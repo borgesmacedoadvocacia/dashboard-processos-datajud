@@ -59,6 +59,14 @@ continuação antes de estourar o limite de 6 minutos do Apps Script.
 | **O** | **Publicações no DJEN** | **todas as publicações do processo**, com data, tribunal, tipo, órgão e texto integral |
 | P–Y | Última Atualização, Qtd. Movimentos, Data/Última Movimentação, Dias sem Movimentação, Qtd./Data/Última Publicação, Fase Processual, Situação | calculadas |
 | Z–AB | Valor da Causa, Cliente / Parte Representada, Origem do Cadastro | planilha-mãe |
+| AC–AF | Resultado da Sentença, Resultado do Recurso, Fase Processual (cadastro), Situação do Alvará | espelho da planilha-mãe, reescrito a cada sincronização |
+
+**Cliente** é o *nome* de quem o escritório representa — `AUTOR` ou `RÉU` conforme a coluna
+PARTE REPRESENTADA da planilha-mãe (que guarda o polo, não o nome).
+
+**Duas fases.** `Fase Processual` (X) é inferida das movimentações do DataJud; `Fase Processual
+(cadastro)` (AE) é a classificação do escritório. A divergência entre as duas é justamente o
+sinal de que o cadastro ficou para trás — o consultor I.A. sabe comparar as duas.
 
 **Tipo de Processo (coluna A)** — o DataJud devolve um registro por grau. A classificação
 percorre os registros do mais recente para o mais antigo e adota o primeiro que caia em

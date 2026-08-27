@@ -217,9 +217,9 @@ function classificarTipo_(regs) {
   for (var i = 0; i < regs.length; i++) {
     var c = norm_((regs[i].classe && regs[i].classe.nome) || '');
     if (/agravo de instrumento/.test(c)) return 'Agravo de Instrumento';
-    if (/apelacao/.test(c))              return 'Recurso de Apelacao';
+    if (/apelacao/.test(c))              return 'Recurso de Apelação';
     if (/cumprimento de sentenca|cumprimento provisorio|cumprimento de decisao/.test(c)) {
-      return 'Cumprimento de Sentenca';
+      return 'Cumprimento de Sentença';
     }
   }
   return 'Processo Principal';
@@ -228,14 +228,14 @@ function classificarTipo_(regs) {
 function inferirFase_(trilha, classe, ultima, recente) {
   var t = norm_(trilha), c = norm_(classe), u = norm_(ultima), r = norm_(recente || ultima);
   if (/arquivamento definitivo|baixa definitiva|arquivado definitivamente/.test(r)) return 'Arquivado / baixado';
-  if (/cumprimento de sentenca|cumprimento provisorio|execucao de titulo/.test(c)) return 'Cumprimento / execucao';
+  if (/cumprimento de sentenca|cumprimento provisorio|execucao de titulo/.test(c)) return 'Cumprimento / execução';
   if (/agravo de instrumento/.test(c)) return 'Agravo de instrumento';
-  if (/apelacao|recurso inominado|embargos de declaracao/.test(c + '\n' + u)) return 'Recursal / 2o grau';
-  if (/transito em julgado/.test(r)) return 'Transito em julgado';
+  if (/apelacao|recurso inominado|embargos de declaracao/.test(c + '\n' + u)) return 'Recursal / 2º grau';
+  if (/transito em julgado/.test(r)) return 'Trânsito em julgado';
   if (/procedencia|improcedencia|homologacao de acordo|julgamento|sentenca/.test(u + '\n' + t)) return 'Sentenciado';
   if (/conclusao para julgamento|conclusos para sentenca|conclusao para decisao/.test(u + '\n' + t)) return 'Concluso';
-  if (/audiencia|pericia|contestacao|replica|especificacao de provas/.test(u + '\n' + t)) return 'Instrucao';
-  if (/citacao|distribuicao|peticao inicial|liminar|tutela/.test(u + '\n' + t)) return 'Inicial / citacao';
+  if (/audiencia|pericia|contestacao|replica|especificacao de provas/.test(u + '\n' + t)) return 'Instrução';
+  if (/citacao|distribuicao|peticao inicial|liminar|tutela/.test(u + '\n' + t)) return 'Inicial / citação';
   return 'Em andamento';
 }
 
@@ -341,7 +341,7 @@ function etapaDescobrir_(cur) {
       var n = soDigitos_(dv[i][0]);
       if (n.length !== 20 || naBase[n] || vistos[n]) continue;
       vistos[n] = 1;
-      var linha = []; for (var c = 0; c < 28; c++) linha.push('');
+      var linha = []; for (var c = 0; c < N_COLUNAS; c++) linha.push('');
       linha[1]  = formatarCNJ_(n);
       linha[2]  = String(dv[i][7] || '');
       linha[27] = 'Descoberto no DJEN';
@@ -358,7 +358,7 @@ function etapaDescobrir_(cur) {
   }
   for (var off = 0; off < novos.length; off += 500) {
     var bloco = novos.slice(off, off + 500);
-    aba.getRange(inicio + off, 1, bloco.length, 28).setValues(bloco);
+    aba.getRange(inicio + off, 1, bloco.length, N_COLUNAS).setValues(bloco);
   }
   var total = Number(cur.novos || 0) + novos.length;
   gravarSync_({ novos: total, processos: aba.getLastRow() - 1,
@@ -437,6 +437,10 @@ function etapaConsolidar_(cur, t0) {
   var tz       = Session.getScriptTimeZone() || 'America/Bahia';
   var agora    = new Date();
   var carimbo  = Utilities.formatDate(agora, tz, 'dd/MM/yyyy HH:mm');
+  var soData = function (v) {
+    if (v instanceof Date) return Utilities.formatDate(v, tz, 'dd/MM/yyyy');
+    return String(v || '');
+  };
 
   /* fatiado por tempo: a coluna O carrega o texto integral das publicacoes */
   var ini      = Math.max(0, Number(cur.off || 0));
@@ -471,7 +475,7 @@ function etapaConsolidar_(cur, t0) {
     totalPub += lista.length;
 
     var qtdMov   = Number(colQS[r2][0] || 0);
-    var ultMovBR = String(colQS[r2][1] || '');
+    var ultMovBR = soData(colQS[r2][1]);
     var fase     = String(colX[r2][0] || '');
     var dtMov    = brParaData_(ultMovBR);
     var dtPub    = lista.length ? isoParaData_(lista[0].data) : null;
@@ -611,8 +615,8 @@ function garantirDJEN_(ss) {
 function garantirCabecalho_(ss) {
   var aba = ss.getSheetByName(cfg_('ABA_BASE'));
   if (!aba) aba = ss.insertSheet(cfg_('ABA_BASE'));
-  if (aba.getMaxColumns() < 28) aba.insertColumnsAfter(aba.getMaxColumns(), 28 - aba.getMaxColumns());
-  aba.getRange(1, 1, 1, 28).setValues([COLUNAS]).setFontWeight('bold');
+  if (aba.getMaxColumns() < N_COLUNAS) aba.insertColumnsAfter(aba.getMaxColumns(), N_COLUNAS - aba.getMaxColumns());
+  aba.getRange(1, 1, 1, N_COLUNAS).setValues([COLUNAS]).setFontWeight('bold');
   aba.setFrozenRows(1);
   return aba;
 }
@@ -669,15 +673,21 @@ function dataBR_(v) {
   return m ? (m[3] + '/' + m[2] + '/' + m[1]) : s;
 }
 
-function brParaData_(s) {
-  var m = String(s || '').match(/^(\d{2})\/(\d{2})\/(\d{4})/);
-  return m ? new Date(Number(m[3]), Number(m[2]) - 1, Number(m[1])) : null;
-}
-
-function isoParaData_(s) {
-  var m = String(s || '').match(/^(\d{4})-(\d{2})-(\d{2})/);
+/**
+ * Aceita Date (o Sheets converte "dd/mm/aaaa" em data ao gravar), "dd/mm/aaaa"
+ * e "aaaa-mm-dd". Sem isso, o round-trip pela planilha perdia a data e
+ * "Dias sem Movimentacao" saia vazio.
+ */
+function brParaData_(v) {
+  if (v instanceof Date) return isNaN(v.getTime()) ? null : v;
+  var s = String(v || '');
+  var m = s.match(/^(\d{2})\/(\d{2})\/(\d{4})/);
+  if (m) return new Date(Number(m[3]), Number(m[2]) - 1, Number(m[1]));
+  m = s.match(/^(\d{4})-(\d{2})-(\d{2})/);
   return m ? new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3])) : null;
 }
+
+function isoParaData_(v) { return brParaData_(v); }
 
 /** Endpoint do DataJud a partir do numero CNJ (...AAAA.J.TR.OOOO). */
 var UF_ESTADUAL = { '01': 'ac', '02': 'al', '03': 'ap', '04': 'am', '05': 'ba', '06': 'ce',

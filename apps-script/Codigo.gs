@@ -64,8 +64,11 @@ var COLUNAS = [
   /* gestão */
   'Última Atualização','Qtd. Movimentos','Data da Última Movimentação','Última Movimentação',
   'Dias sem Movimentação','Qtd. Publicações','Data da Última Publicação','Última Publicação',
-  'Fase Processual','Situação','Valor da Causa','Cliente / Parte Representada','Origem do Cadastro'
+  'Fase Processual','Situação','Valor da Causa','Cliente / Parte Representada','Origem do Cadastro',
+  /* espelho da planilha-mãe — classificação do escritório */
+  'Resultado da Sentença','Resultado do Recurso','Fase Processual (cadastro)','Situação do Alvará'
 ];
+var N_COLUNAS = 32;
 
 /* --------------------------- MENU / SETUP ------------------------------- */
 
@@ -94,7 +97,7 @@ function configurarTudo() {
     SpreadsheetApp.getUi().alert(
       'Configuracao concluida.\n\n' +
       '- Abas _Config, _Sync e _DJEN criadas.\n' +
-      '- Cabecalho da "Base geral" ajustado (28 colunas).\n' +
+      '- Cabecalho da "Base geral" ajustado (' + N_COLUNAS + ' colunas).\n' +
       '- Gatilho diario as 6h criado.\n\n' +
       'Agora publique o Web App (Implantar > Nova implantacao > App da Web, ' +
       'executar como Eu, acesso Qualquer pessoa) e cole a URL no dashboard.');
@@ -261,12 +264,13 @@ function etapaBase_(cur) {
   var existentes = {};
   var ordem = [];
   var ult = aba.getLastRow();
-  var colC = [], colZAB = [], linhas = [];
+  var colC = [], colZAB = [], colACAF = [], linhas = [];
   if (ult > 1) {
     var qtdL = ult - 1;
     var nums = aba.getRange(2, 2, qtdL, 1).getValues();
     colC   = aba.getRange(2, 3, qtdL, 1).getValues();
     colZAB = aba.getRange(2, 26, qtdL, 3).getValues();
+    colACAF = aba.getRange(2, 29, qtdL, 4).getValues();
     for (var i = 0; i < qtdL; i++) {
       var n = soDigitos_(nums[i][0]);
       if (n.length !== 20 || existentes[n]) continue;
@@ -288,17 +292,28 @@ function etapaBase_(cur) {
       var cNum  = ix('Nº DO PROCESSO');
       if (cNum < 0) cNum = acharColunaNumero_(hh);
       var cTipo = ix('TIPO DE PROCESSO'), cAut = ix('AUTOR'), cReu = ix('RÉU'),
-          cVal  = ix('VALOR DA CAUSA'),   cPar = ix('PARTE REPRESENTADA');
+          cVal  = ix('VALOR DA CAUSA'),   cPar = ix('PARTE REPRESENTADA'),
+          cSen  = ix('RESULTADO DE SENTENÇA'), cRec = ix('RESULTADO DO RECURSO'),
+          cFas  = ix('FASE PROCESSUAL'),       cAlv = ix('SITUAÇÃO DO ALVARÁ');
       for (var r = 1; r < mv.length; r++) {
         var num = soDigitos_(mv[r][cNum]);
         if (num.length !== 20 || meta[num]) continue;
         var autor = cAut >= 0 ? String(mv[r][cAut] || '').trim() : '';
         var reu   = cReu >= 0 ? String(mv[r][cReu] || '').trim() : '';
+        /* PARTE REPRESENTADA guarda o POLO ("Autor"/"Reu"), nao o nome.
+           O cliente e o nome de quem o escritorio representa. */
+        var polo = cPar >= 0 ? String(mv[r][cPar] || '').trim() : '';
+        var cliente = /r[eé]u/i.test(polo) ? reu : autor;
         meta[num] = {
           tipo:    cTipo >= 0 ? String(mv[r][cTipo] || '').trim() : '',
           partes:  (autor && reu) ? (autor + ' x ' + reu) : (autor || reu),
           valor:   cVal >= 0 ? mv[r][cVal] : '',
-          cliente: cPar >= 0 ? String(mv[r][cPar] || '').trim() : ''
+          polo:    polo,
+          cliente: cliente || autor || reu,
+          sentenca: cSen >= 0 ? String(mv[r][cSen] || '').trim() : '',
+          recurso:  cRec >= 0 ? String(mv[r][cRec] || '').trim() : '',
+          fase:     cFas >= 0 ? String(mv[r][cFas] || '').trim() : '',
+          alvara:   cAlv >= 0 ? String(mv[r][cAlv] || '').trim() : ''
         };
       }
     }
@@ -309,17 +324,25 @@ function etapaBase_(cur) {
   /* 1c. enriquece as linhas que ja estao na planilha (sem sobrescrever o que
          alguem preencheu a mao) */
   if (ordem.length) {
-    var mudouC = false, mudouZ = false;
+    var mudouC = false, mudouZ = false, mudouM = false;
     ordem.forEach(function (n) {
       var e = existentes[n]; if (e.idx == null) return;
       var m = meta[n]; if (!m) return;
       if (!String(colC[e.idx][0] || '').trim() && m.partes) { colC[e.idx][0] = m.partes; mudouC = true; }
       if (!String(colZAB[e.idx][0] || '').trim() && m.valor)   { colZAB[e.idx][0] = m.valor;   mudouZ = true; }
-      if (!String(colZAB[e.idx][1] || '').trim() && m.cliente) { colZAB[e.idx][1] = m.cliente; mudouZ = true; }
+      if (m.cliente && String(colZAB[e.idx][1] || '').trim() !== m.cliente) {
+        colZAB[e.idx][1] = m.cliente; mudouZ = true;
+      }
       if (!String(colZAB[e.idx][2] || '').trim())              { colZAB[e.idx][2] = 'Clientes e Processos'; mudouZ = true; }
+      /* espelho: a planilha-mae manda nesses quatro, entao sempre reescreve */
+      var espelho = [m.sentenca || '', m.recurso || '', m.fase || '', m.alvara || ''];
+      for (var q = 0; q < 4; q++) {
+        if (String(colACAF[e.idx][q] || '') !== espelho[q]) { colACAF[e.idx][q] = espelho[q]; mudouM = true; }
+      }
     });
     if (mudouC) aba.getRange(2, 3, colC.length, 1).setValues(colC);
     if (mudouZ) aba.getRange(2, 26, colZAB.length, 3).setValues(colZAB);
+    if (mudouM) aba.getRange(2, 29, colACAF.length, 4).setValues(colACAF);
   }
 
   /* 1d. semeia a base pela planilha-mae — por padrao SO se a aba estiver vazia,
@@ -344,13 +367,17 @@ function etapaBase_(cur) {
     if (existentes[n].linha) return;
     var m = meta[n] || {};
     var linha = [];
-    for (var c = 0; c < 28; c++) linha.push('');
+    for (var c = 0; c < N_COLUNAS; c++) linha.push('');
     linha[0]  = m.tipo || '';
     linha[1]  = formatarCNJ_(n);
     linha[2]  = m.partes || existentes[n].partes || '';
     linha[25] = m.valor || '';
     linha[26] = m.cliente || '';
     linha[27] = existentes[n].origem || 'Clientes e Processos';
+    linha[28] = m.sentenca || '';
+    linha[29] = m.recurso || '';
+    linha[30] = m.fase || '';
+    linha[31] = m.alvara || '';
     linhasNovas.push(linha);
   });
   if (linhasNovas.length) {
@@ -360,7 +387,7 @@ function etapaBase_(cur) {
     }
     for (var off = 0; off < linhasNovas.length; off += 500) {
       var bloco = linhasNovas.slice(off, off + 500);
-      aba.getRange(inicio + off, 1, bloco.length, 28).setValues(bloco);
+      aba.getRange(inicio + off, 1, bloco.length, N_COLUNAS).setValues(bloco);
     }
   }
 

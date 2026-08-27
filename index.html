@@ -108,6 +108,8 @@
            display:flex;align-items:center;gap:8px;}
   .card h2 span{font-size:11px;color:var(--text-sub);font-weight:500;}
   .chartbox{position:relative;height:250px;}
+  .sub2{font-size:11px;font-weight:600;color:var(--text-sub);text-transform:uppercase;
+        letter-spacing:.6px;margin-bottom:8px;}
 
   /* ---------- alertas de gestão ---------- */
   .alertas{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:10px;}
@@ -205,7 +207,7 @@
 
   <div class="grid g2">
     <div class="card"><h2>Carteira por tipo de processo</h2><div class="chartbox"><canvas id="cTipo"></canvas></div></div>
-    <div class="card"><h2>Fase processual</h2><div class="chartbox"><canvas id="cFase"></canvas></div></div>
+    <div class="card"><h2>Situação da carteira</h2><div class="chartbox"><canvas id="cSit"></canvas></div></div>
   </div>
 
   <div class="grid g2">
@@ -216,6 +218,24 @@
   <div class="grid g2">
     <div class="card"><h2>Ajuizamentos por ano</h2><div class="chartbox"><canvas id="cAno"></canvas></div></div>
     <div class="card"><h2>Idade da carteira <span>dias sem movimentação</span></h2><div class="chartbox"><canvas id="cIdade"></canvas></div></div>
+  </div>
+
+  <div class="card" style="margin-bottom:16px">
+    <h2>Mérito, recursos e recebimentos <span>classificação do escritório · clique para filtrar</span></h2>
+    <div class="kpis" id="kpisMerito" style="margin-bottom:14px"></div>
+    <div class="grid g3" style="margin-bottom:0">
+      <div><h3 class="sub2">Resultado da sentença</h3><div class="chartbox"><canvas id="cSent"></canvas></div></div>
+      <div><h3 class="sub2">Recursos de mérito</h3><div class="chartbox"><canvas id="cRec"></canvas></div></div>
+      <div><h3 class="sub2">Situação dos alvarás</h3><div class="chartbox"><canvas id="cAlv"></canvas></div></div>
+    </div>
+  </div>
+
+  <div class="card" style="margin-bottom:16px">
+    <h2>Fase do processo <span>cadastro do escritório × movimentação no DataJud</span></h2>
+    <div class="grid g2" style="margin-bottom:0">
+      <div><h3 class="sub2">Fase no cadastro</h3><div class="chartbox"><canvas id="cFaseCad"></canvas></div></div>
+      <div><h3 class="sub2">Fase inferida pelo DataJud</h3><div class="chartbox"><canvas id="cFase"></canvas></div></div>
+    </div>
   </div>
 
   <div class="card" style="margin-bottom:16px">
@@ -246,6 +266,11 @@
       <select id="fSituacao"></select>
       <select id="fTribunal"></select>
       <select id="fGrau"></select>
+      <select id="fAno"></select>
+      <select id="fSentenca"></select>
+      <select id="fRecurso"></select>
+      <select id="fAlvara"></select>
+      <select id="fFaseCad"></select>
       <button class="btn" id="btnLimpar">Limpar filtros</button>
       <button class="btn" id="btnCSV">Exportar CSV</button>
     </div>
@@ -293,7 +318,9 @@ const COL = { tipo:0,num:1,partes:2,tribunal:3,vara:4,grau:5,classe:6,assunto:7,
               ajuizamento:9,sistema:10,formato:11,sigilo:12,
               /* N e O ficam de fora do carregamento (texto pesado, lido sob demanda) */
               atualizado:0,qtdMov:1,dtMov:2,ultMov:3,diasSemMov:4,qtdPub:5,dtPub:6,ultPub:7,
-              fase:8,situacao:9,valor:10,cliente:11,origem:12 };
+              fase:8,situacao:9,valor:10,cliente:11,origem:12,
+              /* espelho da planilha-mãe (AC..AF) */
+              sentenca:13,recurso:14,faseCad:15,alvara:16 };
 
 let ROWS = [], FILTRO = {}, CHARTS = {}, ORDEM = { campo:'diasSemMov', asc:false }, SYNC = null, TIMER=null;
 
@@ -311,6 +338,19 @@ const dBR = s => { const m=String(s||'').match(/^(\d{2})\/(\d{2})\/(\d{4})/); re
 
 function anoDe(r){ const d=dBR(r.ajuizamento); return d?d.getFullYear():null; }
 
+/* O DataJud devolve um registro por grau, e um processo pode ter varios.
+   Em vez de listar as 25 combinacoes ("G1 | JE | TR"), o filtro trabalha com
+   a instancia isolada e casa por presenca. */
+const GRAUS = [
+  ['JE',  'Juizado Especial (JE)'],
+  ['G1',  '1º grau (G1)'],
+  ['TR',  'Turma Recursal (TR)'],
+  ['G2',  '2º grau (G2)'],
+  ['TRU', 'Turma de Uniformização (TRU)'],
+  ['SUP', 'Tribunal Superior (SUP)']
+];
+const ROTULO_GRAU = Object.fromEntries(GRAUS);
+
 /* =====================================================================
    CARREGAMENTO
    ===================================================================== */
@@ -326,11 +366,11 @@ async function sheets(ranges){
 async function carregar(){
   let vr;
   try{
-    vr = await sheets(["'"+ABA+"'!A2:M", "'"+ABA+"'!P2:AB", "'"+ABA_SYNC+"'!A1:B11"]);
+    vr = await sheets(["'"+ABA+"'!A2:M", "'"+ABA+"'!P2:AF", "'"+ABA_SYNC+"'!A1:B11"]);
   }catch(e){
     /* a aba _Sync só existe depois que o Apps Script é instalado */
     try{
-      vr = await sheets(["'"+ABA+"'!A2:M", "'"+ABA+"'!P2:AB"]);
+      vr = await sheets(["'"+ABA+"'!A2:M", "'"+ABA+"'!P2:AF"]);
       vr.push({values:[]});
     }catch(e2){
       $('#syncInfo').innerHTML = '<b style="color:var(--danger)">Erro ao ler a planilha</b><br>'+esc(e2.message.slice(0,90));
@@ -354,6 +394,7 @@ async function carregar(){
       tribunal: String(a[COL.tribunal]||'').trim() || '—',
       vara: String(a[COL.vara]||'').trim(),
       grau: String(a[COL.grau]||'').trim() || '—',
+      graus: String(a[COL.grau]||'').split('|').map(x=>x.trim()).filter(Boolean),
       classe: String(a[COL.classe]||'').trim(),
       assunto: String(a[COL.assunto]||'').trim(),
       orgao: String(a[COL.orgao]||'').trim(),
@@ -373,7 +414,11 @@ async function carregar(){
       situacao: String(b[COL.situacao]||'').trim() || 'Sem dados nas fontes',
       valor: num(b[COL.valor]),
       cliente: String(b[COL.cliente]||'').trim(),
-      origem: String(b[COL.origem]||'').trim()
+      origem: String(b[COL.origem]||'').trim(),
+      sentenca: String(b[COL.sentenca]||'').trim(),
+      recurso: String(b[COL.recurso]||'').trim(),
+      faseCad: String(b[COL.faseCad]||'').trim(),
+      alvara: String(b[COL.alvara]||'').trim()
     });
   }
   render();
@@ -540,9 +585,44 @@ function contar(campo, max){
   if(max && e.length>max){ const resto=e.slice(max).reduce((s,x)=>s+x[1],0); e=e.slice(0,max); if(resto) e.push(['Outros',resto]); }
   return e;
 }
+function kpisMerito(){
+  const R = ROWS;
+  const q = (campo,valor) => R.filter(r=>nrm(r[campo])===nrm(valor)).length;
+  const proc = q('sentenca','Procedência'), impr = q('sentenca','Improcedência');
+  const acordo = q('sentenca','Acordo Homologado');
+  const julgados = proc + impr;
+  const exito = julgados ? (100*proc/julgados) : null;
+  const recAguard = q('recurso','Aguardando Julgamento');
+  const recProv = q('recurso','Provido'), recNeg = q('recurso','Não Provido');
+  const credit = q('alvara','Creditado');
+  const aReceber = R.filter(r=>/solicitado|aguardando/i.test(r.alvara)).length;
+
+  const K = [
+    ['Sentenças de mérito', fmtN(julgados), fmtN(proc)+' procedências · '+fmtN(impr)+' improcedências', 'var(--primary)', {meritoJulgado:true}],
+    ['Taxa de êxito', exito===null?'—':exito.toFixed(1).replace('.',',')+'%', 'procedência sobre o mérito julgado', 'var(--green)', {sentenca:'Procedência'}],
+    ['Acordos homologados', fmtN(acordo), 'encerramento consensual', 'var(--info)', {sentenca:'Acordo Homologado'}],
+    ['Recursos aguardando', fmtN(recAguard), fmtN(recProv)+' providos · '+fmtN(recNeg)+' não providos', 'var(--warning)', {recurso:'Aguardando Julgamento'}],
+    ['Alvarás creditados', fmtN(credit), 'valor já em conta', 'var(--green)', {alvara:'Creditado'}],
+    ['Alvarás a receber', fmtN(aReceber), 'solicitados ou aguardando prazo', 'var(--danger)', {alvaraAReceber:true}]
+  ];
+  $('#kpisMerito').innerHTML = K.map((k,i)=>
+    '<div class="kpi" style="--accent:'+k[3]+'" data-m="'+i+'">'+
+    '<div class="lbl">'+k[0]+'</div><div class="val mono">'+k[1]+'</div><div class="sub">'+k[2]+'</div></div>').join('');
+  $$('#kpisMerito .kpi').forEach(el=>el.onclick=()=>{
+    FILTRO = Object.assign({}, K[+el.dataset.m][4]); sincronizarSelects(); tabela();
+    $('.tabwrap').scrollIntoView({behavior:'smooth'});
+  });
+}
+
 function graficos(){
+  kpisMerito();
   let e = contar('tipo');           chart('cTipo','doughnut', e.map(x=>x[0]), e.map(x=>x[1]));
+  e = contar('situacao');           chart('cSit','doughnut', e.map(x=>x[0]), e.map(x=>x[1]));
   e = contar('fase');               chart('cFase','doughnut', e.map(x=>x[0]), e.map(x=>x[1]));
+  e = contar('faseCad');            chart('cFaseCad','doughnut', e.map(x=>x[0]), e.map(x=>x[1]));
+  e = contar('sentenca');           chart('cSent','doughnut', e.map(x=>x[0]), e.map(x=>x[1]));
+  e = contar('recurso');            chart('cRec','doughnut', e.map(x=>x[0]), e.map(x=>x[1]));
+  e = contar('alvara');             chart('cAlv','doughnut', e.map(x=>x[0]), e.map(x=>x[1]));
   e = contar('tribunal',12);        chart('cTrib','bar', e.map(x=>x[0]), e.map(x=>x[1]));
 
   const meses = {};
@@ -562,9 +642,10 @@ function graficos(){
 
 /* ------------------------------ tabela ------------------------------- */
 const COLUNAS_TAB = [
-  ['num','Nº do processo'],['tipo','Tipo'],['cliente','Cliente'],['tribunal','Trib.'],
+  ['num','Nº do processo'],['tipo','Tipo'],['cliente','Cliente'],['tribunal','Trib.'],['grau','Inst.'],
   ['vara','Vara / órgão'],['fase','Fase'],['situacao','Situação'],['dias','Dias parado'],
-  ['qtdMov','Mov.'],['qtdPub','Pub.'],['dtPub','Últ. publicação'],['ultMov','Última movimentação']
+  ['qtdMov','Mov.'],['qtdPub','Pub.'],['dtPub','Últ. publicação'],
+  ['sentenca','Sentença'],['recurso','Recurso'],['alvara','Alvará'],['ultMov','Última movimentação']
 ];
 function montarFiltros(){
   const op = (sel, campo, rot) => {
@@ -573,13 +654,32 @@ function montarFiltros(){
     $(sel).innerHTML = '<option value="">'+rot+' (todos)</option>' + vals.map(v=>'<option>'+esc(v)+'</option>').join('');
     if(atual) $(sel).value = atual;
   };
-  op('#fTipo','tipo','Tipo'); op('#fFase','fase','Fase'); op('#fSituacao','situacao','Situação');
-  op('#fTribunal','tribunal','Tribunal'); op('#fGrau','grau','Grau');
+  op('#fTipo','tipo','Tipo'); op('#fFase','fase','Fase (DataJud)'); op('#fSituacao','situacao','Situação');
+  op('#fTribunal','tribunal','Tribunal');
+
+  const presentes = new Set(); ROWS.forEach(r=>r.graus.forEach(g=>presentes.add(g)));
+  const listaGrau = GRAUS.filter(g=>presentes.has(g[0]))
+    .concat([...presentes].filter(g=>!ROTULO_GRAU[g]).sort().map(g=>[g,g]));
+  const atualG = $('#fGrau').value;
+  $('#fGrau').innerHTML = '<option value="">Instância (todas)</option>' +
+    listaGrau.map(g=>'<option value="'+esc(g[0])+'">'+esc(g[1])+'</option>').join('');
+  if(atualG) $('#fGrau').value = atualG;
+
+  const anos = [...new Set(ROWS.map(anoDe).filter(a=>a&&a>1990))].sort((a,b)=>b-a);
+  const atualA = $('#fAno').value;
+  $('#fAno').innerHTML = '<option value="">Ano de distribuição (todos)</option>' +
+    anos.map(a=>'<option value="'+a+'">'+a+'</option>').join('');
+  if(atualA) $('#fAno').value = atualA;
+  op('#fSentenca','sentenca','Sentença'); op('#fRecurso','recurso','Recurso');
+  op('#fAlvara','alvara','Alvará'); op('#fFaseCad','faseCad','Fase (cadastro)');
 }
 function sincronizarSelects(){
   $('#fTipo').value = FILTRO.tipo||''; $('#fFase').value = FILTRO.fase||'';
   $('#fSituacao').value = FILTRO.situacao||''; $('#fTribunal').value = FILTRO.tribunal||'';
   $('#fGrau').value = FILTRO.grau||'';
+  $('#fSentenca').value = FILTRO.sentenca||''; $('#fRecurso').value = FILTRO.recurso||'';
+  $('#fAlvara').value = FILTRO.alvara||''; $('#fFaseCad').value = FILTRO.faseCad||'';
+  $('#fAno').value = FILTRO.ano||'';
   if(FILTRO.busca===undefined) $('#fBusca').value = '';
 }
 function filtrar(){
@@ -589,7 +689,14 @@ function filtrar(){
     if(FILTRO.fase && r.fase!==FILTRO.fase) return false;
     if(FILTRO.situacao && r.situacao!==FILTRO.situacao) return false;
     if(FILTRO.tribunal && r.tribunal!==FILTRO.tribunal) return false;
-    if(FILTRO.grau && r.grau!==FILTRO.grau) return false;
+    if(FILTRO.grau && r.graus.indexOf(FILTRO.grau)<0) return false;
+    if(FILTRO.ano && String(anoDe(r))!==String(FILTRO.ano)) return false;
+    if(FILTRO.sentenca && r.sentenca!==FILTRO.sentenca) return false;
+    if(FILTRO.recurso && r.recurso!==FILTRO.recurso) return false;
+    if(FILTRO.alvara && r.alvara!==FILTRO.alvara) return false;
+    if(FILTRO.faseCad && r.faseCad!==FILTRO.faseCad) return false;
+    if(FILTRO.meritoJulgado && !/^(proced|improced)/.test(nrm(r.sentenca))) return false;
+    if(FILTRO.alvaraAReceber && !/solicitado|aguardando/i.test(r.alvara)) return false;
     if(FILTRO.pub30){ const d=dBR(r.dtPub); if(!(d&&(hoje-d)/864e5<=30)) return false; }
     if(FILTRO.novos12m){ const d=dBR(r.ajuizamento); if(!(d&&(hoje-d)/864e5<=365)) return false; }
     if(FILTRO.alerta==='pub7'){ const d=dBR(r.dtPub); if(!(d&&(hoje-d)/864e5<=7)) return false; }
@@ -623,6 +730,7 @@ function tabela(){
     '<td>'+chipTipo(r.tipo)+'</td>'+
     '<td><span class="trunc" style="max-width:170px">'+esc(r.cliente||r.partes||'—')+'</span></td>'+
     '<td>'+esc(r.tribunal)+'</td>'+
+    '<td style="white-space:nowrap">'+esc(r.graus.join(' › ')||'—')+'</td>'+
     '<td><span class="trunc" style="max-width:190px">'+esc(r.vara||r.orgao||'—')+'</span></td>'+
     '<td>'+esc(r.fase)+'</td>'+
     '<td>'+chipSit(r.situacao)+'</td>'+
@@ -630,6 +738,9 @@ function tabela(){
     '<td class="mono">'+fmtN(r.qtdMov)+'</td>'+
     '<td class="mono">'+fmtN(r.qtdPub)+'</td>'+
     '<td class="mono" style="white-space:nowrap">'+esc(r.dtPub||'—')+'</td>'+
+    '<td>'+chipSent(r.sentenca)+'</td>'+
+    '<td><span class="trunc" style="max-width:130px">'+esc(r.recurso||'—')+'</span></td>'+
+    '<td><span class="trunc" style="max-width:150px">'+esc(r.alvara||'—')+'</span></td>'+
     '<td><span class="trunc">'+esc(r.ultMov||'—')+'</span></td>'+
     '</tr>').join('');
   $$('#tbody tr').forEach(tr=>tr.onclick=()=>abrirDetalhe(+tr.dataset.l));
@@ -639,6 +750,15 @@ function chipTipo(t){
   const c = /cumprimento/i.test(t)?'var(--green)':/agravo/i.test(t)?'var(--warning)':/apelac/i.test(nrm(t))?'var(--info)':'var(--neutral)';
   const bg= /cumprimento/i.test(t)?'var(--green-light)':/agravo/i.test(t)?'var(--warning-light)':/apelac/i.test(nrm(t))?'var(--info-light)':'var(--neutral-light)';
   return '<span class="chip" style="color:'+c+';background:'+bg+'">'+esc(t)+'</span>';
+}
+function chipSent(t){
+  if(!t) return '—';
+  const k = nrm(t);
+  const c = k.indexOf('improced')===0 ? 'var(--danger)'
+          : k.indexOf('proced')===0   ? 'var(--green)'
+          : k.indexOf('acordo')>=0    ? 'var(--info)'
+          : k.indexOf('extin')>=0     ? 'var(--neutral)' : 'var(--text-muted)';
+  return '<span class="chip" style="color:'+c+';background:rgba(255,255,255,.05)">'+esc(t)+'</span>';
 }
 function chipSit(s){
   const c = s==='Ativo'?'var(--green)':s==='Estagnado'?'var(--danger)':/arquiv/i.test(s)?'var(--neutral)':'var(--text-muted)';
@@ -665,7 +785,10 @@ async function abrirDetalhe(linha){
     ln('Tribunal', r.tribunal) + ln('Grau', r.grau) + ln('Vara de origem', r.vara) +
     ln('Órgão julgador', r.orgao) + ln('Classe', r.classe) + ln('Assunto', r.assunto) +
     ln('Ajuizamento', r.ajuizamento) + ln('Sistema / formato', [r.sistema,r.formato].filter(Boolean).join(' · ')) +
-    ln('Nível de sigilo', String(r.sigilo)) + ln('Fase processual', r.fase) + ln('Situação', r.situacao) +
+    ln('Nível de sigilo', String(r.sigilo)) +
+    ln('Fase (DataJud)', r.fase) + ln('Fase (cadastro)', r.faseCad) + ln('Situação', r.situacao) +
+    ln('Resultado da sentença', r.sentenca) + ln('Resultado do recurso', r.recurso) +
+    ln('Situação do alvará', r.alvara) +
     ln('Dias sem movimentação', r.dias==null?'—':fmtN(r.dias)) +
     ln('Valor da causa', r.valor?fmtM(r.valor):'—') +
     ln('Movimentos · publicações', fmtN(r.qtdMov)+' · '+fmtN(r.qtdPub)) +
@@ -716,13 +839,20 @@ const TOOLS = [
   input_schema:{ type:'object', properties:{
     tipo:{type:'string',description:'Tipo de Processo: Processo Principal, Cumprimento de Sentenca, Agravo de Instrumento ou Recurso de Apelacao'},
     fase:{type:'string'}, situacao:{type:'string',description:'Ativo, Estagnado, Arquivado / baixado ou Sem dados nas fontes'},
-    tribunal:{type:'string'}, grau:{type:'string'}, cliente:{type:'string'}, assunto:{type:'string'},
+    tribunal:{type:'string'}, cliente:{type:'string'}, assunto:{type:'string'},
+    grau:{type:'string',description:'instância isolada: JE, G1, TR, G2, TRU ou SUP (casa se o processo tiver registro naquele grau)'},
+    sentenca:{type:'string',description:'Resultado da sentença: Procedência, Improcedência, Acordo Homologado, Extinção do Processo ou Não Sentenciado'},
+    recurso:{type:'string',description:'Resultado do recurso: Não Houve Recurso, Provido, Não Provido, Aguardando Julgamento, Resultado Neutro'},
+    alvara:{type:'string',description:'Situação do alvará: Creditado, Solicitado e Aguardando Compensação, Ainda não Solicitado (Aguardando Prazo), Não há Valores a Receber, Processo em Fase de Conhecimento, Processo em Fase Recursal'},
+    fase_cadastro:{type:'string',description:'Fase no cadastro do escritório: Processo de Conhecimento, Fase Recursal, Processo de Execução, Arquivado/Encerrado'},
+    apenas_merito_julgado:{type:'boolean',description:'só processos com Procedência ou Improcedência'},
+    alvara_a_receber:{type:'boolean',description:'só alvarás solicitados ou aguardando prazo'},
     texto:{type:'string',description:'busca livre em número, partes, vara, assunto, última movimentação'},
     dias_sem_movimentacao_min:{type:'number'}, dias_sem_movimentacao_max:{type:'number'},
     ajuizado_de_ano:{type:'number'}, ajuizado_ate_ano:{type:'number'},
     publicacao_ultimos_dias:{type:'number',description:'só processos com publicação no DJEN nos últimos N dias'},
     sem_publicacao:{type:'boolean'}, valor_causa_min:{type:'number'},
-    agrupar_por:{type:'string',description:'tipo, fase, situacao, tribunal, grau, cliente, assunto, ano'},
+    agrupar_por:{type:'string',description:'tipo, fase, situacao, tribunal, grau, cliente, assunto, ano, sentenca, recurso, alvara, fase_cadastro'},
     ordenar_por:{type:'string',description:'dias, qtdMov, qtdPub, valor, dtPub'},
     limite:{type:'number',description:'quantas linhas da amostra devolver (máx. 40)'}
   }, required:[] }
@@ -748,7 +878,13 @@ function execConsultar(inp){
     if(inp.fase && nrm(r.fase).indexOf(nrm(inp.fase))<0) return false;
     if(inp.situacao && nrm(r.situacao).indexOf(nrm(inp.situacao))<0) return false;
     if(inp.tribunal && nrm(r.tribunal)!==nrm(inp.tribunal)) return false;
-    if(inp.grau && nrm(r.grau).indexOf(nrm(inp.grau))<0) return false;
+    if(inp.grau && !r.graus.some(g=>nrm(g)===nrm(inp.grau))) return false;
+    if(inp.sentenca && nrm(r.sentenca).indexOf(nrm(inp.sentenca))<0) return false;
+    if(inp.recurso && nrm(r.recurso).indexOf(nrm(inp.recurso))<0) return false;
+    if(inp.alvara && nrm(r.alvara).indexOf(nrm(inp.alvara))<0) return false;
+    if(inp.fase_cadastro && nrm(r.faseCad).indexOf(nrm(inp.fase_cadastro))<0) return false;
+    if(inp.apenas_merito_julgado===true && !/^(proced|improced)/.test(nrm(r.sentenca))) return false;
+    if(inp.alvara_a_receber===true && !/solicitado|aguardando/i.test(r.alvara)) return false;
     if(inp.cliente && nrm(r.cliente+' '+r.partes).indexOf(nrm(inp.cliente))<0) return false;
     if(inp.assunto && nrm(r.assunto).indexOf(nrm(inp.assunto))<0) return false;
     if(inp.texto){ const q=nrm(inp.texto);
@@ -771,7 +907,8 @@ function execConsultar(inp){
   const out = { total_encontrado:L.length, total_na_base:ROWS.length };
   if(inp.agrupar_por){
     const campo = {tipo:'tipo',fase:'fase',situacao:'situacao',tribunal:'tribunal',grau:'grau',
-                   cliente:'cliente',assunto:'assunto',ano:'__ano'}[nrm(inp.agrupar_por)] || 'tipo';
+                   cliente:'cliente',assunto:'assunto',ano:'__ano',sentenca:'sentenca',
+                   recurso:'recurso',alvara:'alvara',fase_cadastro:'faseCad'}[nrm(inp.agrupar_por)] || 'tipo';
     const m={}; L.forEach(r=>{ const k = campo==='__ano' ? String(anoDe(r)||'—') : String(r[campo]||'—'); m[k]=(m[k]||0)+1; });
     out.distribuicao = Object.entries(m).sort((a,b)=>b[1]-a[1]).slice(0,30)
       .map(e=>({valor:e[0], processos:e[1]}));
@@ -781,10 +918,12 @@ function execConsultar(inp){
     out.valor_causa = { soma:Math.round(vals.reduce((s,v)=>s+v,0)), mediana:Math.round(vals[Math.floor(vals.length/2)]), com_valor:vals.length }; }
   const ds = L.map(r=>r.dias).filter(d=>d!=null);
   if(ds.length) out.dias_sem_movimentacao = { media:Math.round(ds.reduce((s,d)=>s+d,0)/ds.length), maximo:Math.max.apply(null,ds) };
+  out.merito = resumoMerito(L);
   const lim = Math.min(Math.max(1, inp.limite||12), 40);
   out.amostra = L.slice(0,lim).map(r=>({
     numero:r.num, tipo:r.tipo, cliente:r.cliente||r.partes, tribunal:r.tribunal, vara:r.vara,
-    fase:r.fase, situacao:r.situacao, dias_sem_movimentacao:r.dias,
+    fase_datajud:r.fase, fase_cadastro:r.faseCad, situacao:r.situacao,
+    sentenca:r.sentenca, recurso:r.recurso, alvara:r.alvara, dias_sem_movimentacao:r.dias,
     movimentos:r.qtdMov, publicacoes:r.qtdPub, ultima_movimentacao:r.ultMov,
     data_ultima_movimentacao:r.dtMov, data_ultima_publicacao:r.dtPub,
     ajuizamento:r.ajuizamento, valor_causa:r.valor||null, assunto:r.assunto
@@ -801,13 +940,33 @@ async function execLer(inp){
   const qual = nrm(inp.trecho||'tudo');
   const o = { numero:r.num, tipo:r.tipo, partes:r.partes, cliente:r.cliente, tribunal:r.tribunal,
               grau:r.grau, vara:r.vara, orgao:r.orgao, classe:r.classe, assunto:r.assunto,
-              ajuizamento:r.ajuizamento, fase:r.fase, situacao:r.situacao,
+              ajuizamento:r.ajuizamento, fase_datajud:r.fase, fase_cadastro:r.faseCad,
+              situacao:r.situacao, resultado_sentenca:r.sentenca,
+              resultado_recurso:r.recurso, situacao_alvara:r.alvara,
               dias_sem_movimentacao:r.dias, valor_causa:r.valor||null,
               total_movimentos:r.qtdMov, total_publicacoes:r.qtdPub };
   const corta = s => s.length>16000 ? s.slice(0,16000)+' […texto truncado]' : s;
   if(qual!=='publicacoes') o.movimentos = corta(t.mov) || '(sem movimentações no DataJud)';
   if(qual!=='movimentos')  o.publicacoes = corta(t.pub) || '(sem publicações no DJEN)';
   return o;
+}
+
+function resumoMerito(L){
+  const q = (campo,valor) => L.filter(r=>nrm(r[campo])===nrm(valor)).length;
+  const proc = q('sentenca','Procedência'), impr = q('sentenca','Improcedência');
+  const julgados = proc + impr;
+  return {
+    procedencia: proc, improcedencia: impr,
+    acordo_homologado: q('sentenca','Acordo Homologado'),
+    extincao: q('sentenca','Extinção do Processo'),
+    nao_sentenciado: q('sentenca','Não Sentenciado'),
+    taxa_exito_merito: julgados ? Number((100*proc/julgados).toFixed(1)) : null,
+    recurso_provido: q('recurso','Provido'),
+    recurso_nao_provido: q('recurso','Não Provido'),
+    recurso_aguardando: q('recurso','Aguardando Julgamento'),
+    alvara_creditado: q('alvara','Creditado'),
+    alvara_a_receber: L.filter(r=>/solicitado|aguardando/i.test(r.alvara)).length
+  };
 }
 
 function execPanorama(){
@@ -818,7 +977,11 @@ function execPanorama(){
   const ds = ROWS.map(r=>r.dias).filter(d=>d!=null);
   return {
     total_processos: ROWS.length,
-    por_tipo: g('tipo'), por_fase: g('fase'), por_situacao: g('situacao'), por_tribunal: g('tribunal'),
+    por_tipo: g('tipo'), por_fase_datajud: g('fase'), por_fase_cadastro: g('faseCad'),
+    por_situacao: g('situacao'), por_tribunal: g('tribunal'),
+    por_resultado_sentenca: g('sentenca'), por_resultado_recurso: g('recurso'),
+    por_situacao_alvara: g('alvara'),
+    merito: resumoMerito(ROWS),
     valor_causa: vals.length? { soma:Math.round(vals.reduce((s,v)=>s+v,0)), mediana:Math.round(vals[Math.floor(vals.length/2)]), com_valor:vals.length } : null,
     dias_sem_movimentacao: ds.length? { media:Math.round(ds.reduce((s,d)=>s+d,0)/ds.length), acima_de_180:ROWS.filter(r=>r.dias!=null&&r.dias>180).length } : null,
     publicacoes_ultimos_7_dias: ROWS.filter(r=>{const d=dBR(r.dtPub);return d&&(hoje-d)/864e5<=7;}).length,
@@ -843,8 +1006,12 @@ function systemPrompt(){
 '',
 'Valores existentes na base (use exatamente ao filtrar):',
 '- tipo: '+d('tipo').join(' | '),
-'- fase: '+d('fase').join(' | '),
+'- fase (DataJud, inferida dos movimentos): '+d('fase').join(' | '),
+'- fase_cadastro (classificação do escritório): '+d('faseCad').join(' | '),
 '- situacao: '+d('situacao').join(' | '),
+'- sentenca: '+d('sentenca').join(' | '),
+'- recurso: '+d('recurso').join(' | '),
+'- alvara: '+d('alvara').join(' | '),
 '- tribunais: '+d('tribunal').slice(0,40).join(', '),
 '',
 'Definições da casa:',
@@ -852,6 +1019,10 @@ function systemPrompt(){
 '- Publicação recente no DJEN = prazo provavelmente em curso; é o alerta operacional mais urgente.',
 '- Tipo de processo vem da classe CNJ do registro mais recente: Processo Principal, Cumprimento de Sentença, Agravo de Instrumento ou Recurso de Apelação.',
 '- "Sem dados nas fontes" costuma significar número errado, segredo de justiça ou tribunal que não alimenta o DataJud — é um problema de cadastro, não de mérito.',
+'- Mérito julgado = Procedência + Improcedência. Extinção e Acordo Homologado NÃO são mérito e ficam fora da taxa de êxito.',
+'- Taxa de êxito = Procedência / (Procedência + Improcedência). Vale como êxito do cliente porque o escritório atua no polo ativo em praticamente toda a carteira; se a pergunta envolver processos em que o cliente é réu, avise que a leitura se inverte.',
+'- Dinheiro a receber está em "alvara": Creditado já entrou; Solicitado e Aguardando Compensação e Ainda não Solicitado são o que falta entrar.',
+'- Há DUAS fases: fase_cadastro é a classificação do escritório (autoridade para gestão); fase (DataJud) é inferida dos movimentos e serve para achar divergência entre o cadastro e o andamento real.',
 '',
 'Estilo: português do Brasil, direto, começando pelo número ou pela conclusão. Depois, no máximo 3 a 5 pontos de leitura gerencial (risco, prioridade, o que fazer). Cite os filtros usados. Se a pergunta for ambígua, assuma a leitura mais útil e declare a suposição. Não exponha raciocínio interno.'
   ].join('\n');
@@ -921,6 +1092,9 @@ const SUGESTOES = [
  'Quantos processos estão parados há mais de 180 dias e em quais tribunais?',
  'Como está dividida a carteira entre processo principal, cumprimento de sentença e recursos?',
  'Onde está concentrado o maior valor de causa e qual a fase desses processos?',
+ 'Qual a taxa de êxito no mérito e como ela varia por tribunal?',
+ 'Quais alvarás estão solicitados e ainda não creditados?',
+ 'Em quais processos a fase do cadastro diverge do andamento no DataJud?',
  'Quais processos não retornaram dados nas fontes e precisam de correção de cadastro?'
 ];
 
@@ -933,7 +1107,9 @@ $('#btnFechar').onclick = fechar;
 $('#ov').onclick = fechar;
 document.addEventListener('keydown', e=>{ if(e.key==='Escape') fechar(); });
 $('#fBusca').oninput = e => { FILTRO.busca = e.target.value; tabela(); };
-const MAPA_FILTRO = { fTipo:'tipo', fFase:'fase', fSituacao:'situacao', fTribunal:'tribunal', fGrau:'grau' };
+const MAPA_FILTRO = { fTipo:'tipo', fFase:'fase', fSituacao:'situacao', fTribunal:'tribunal', fGrau:'grau',
+                      fSentenca:'sentenca', fRecurso:'recurso', fAlvara:'alvara', fFaseCad:'faseCad',
+                      fAno:'ano' };
 Object.keys(MAPA_FILTRO).forEach(id=>{
   $('#'+id).onchange = e => {
     delete FILTRO.alerta; delete FILTRO.pub30; delete FILTRO.novos12m;
@@ -945,10 +1121,12 @@ $('#btnLimpar').onclick = () => { FILTRO={}; $('#fBusca').value=''; sincronizarS
 $('#btnCSV').onclick = () => {
   const L = filtrar();
   const cab = ['Numero','Tipo','Cliente','Partes','Tribunal','Grau','Vara','Classe','Assunto','Ajuizamento',
-               'Fase','Situacao','Dias sem movimentacao','Movimentos','Publicacoes','Ultima movimentacao',
+               'Fase (DataJud)','Fase (cadastro)','Situacao','Resultado da sentenca','Resultado do recurso',
+               'Situacao do alvara','Dias sem movimentacao','Movimentos','Publicacoes','Ultima movimentacao',
                'Data ultima movimentacao','Data ultima publicacao','Valor da causa'];
   const linhas = L.map(r=>[r.num,r.tipo,r.cliente,r.partes,r.tribunal,r.grau,r.vara,r.classe,r.assunto,
-    r.ajuizamento,r.fase,r.situacao,r.dias,r.qtdMov,r.qtdPub,r.ultMov,r.dtMov,r.dtPub,r.valor]);
+    r.ajuizamento,r.fase,r.faseCad,r.situacao,r.sentenca,r.recurso,r.alvara,
+    r.dias,r.qtdMov,r.qtdPub,r.ultMov,r.dtMov,r.dtPub,r.valor]);
   const csv = [cab].concat(linhas).map(l=>l.map(c=>'"'+String(c==null?'':c).replace(/"/g,'""')+'"').join(';')).join('\n');
   const a = document.createElement('a');
   a.href = URL.createObjectURL(new Blob(['﻿'+csv],{type:'text/csv;charset=utf-8'}));
