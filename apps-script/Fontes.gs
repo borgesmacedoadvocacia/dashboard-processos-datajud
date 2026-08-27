@@ -10,7 +10,7 @@ var LOTE_LINHAS = 60;   // linhas contiguas processadas por vez no DataJud
 /* ------------------------- ETAPA 2 - DATAJUD ---------------------------- */
 
 function etapaDataJud_(cur, t0) {
-  var ss  = SpreadsheetApp.getActive();
+  var ss  = planilha_();
   var aba = ss.getSheetByName(cfg_('ABA_BASE'));
   var ult = aba.getLastRow();
   var proxima = cur.segundaPassada
@@ -242,7 +242,7 @@ function inferirFase_(trilha, classe, ultima, recente) {
 /* --------------------------- ETAPA 3 - DJEN ----------------------------- */
 
 function etapaDJEN_(cur, t0) {
-  var ss   = SpreadsheetApp.getActive();
+  var ss   = planilha_();
   var abaD = ss.getSheetByName(ABA_DJEN);
   var oabs = listaOABs_();
   var oi = cur.oab || 0, pagina = cur.pagina || 1;
@@ -321,7 +321,7 @@ function etapaDescobrir_(cur) {
   gravarSync_({ etapa: 'descobrir', progresso: 84,
     mensagem: 'Procurando processos do DJEN que ainda nao estao na base...' });
 
-  var ss   = SpreadsheetApp.getActive();
+  var ss   = planilha_();
   var aba  = ss.getSheetByName(cfg_('ABA_BASE'));
   var abaD = ss.getSheetByName(ABA_DJEN);
 
@@ -411,7 +411,7 @@ function etapaConsolidar_(cur, t0) {
   gravarSync_({ etapa: 'consolidar', progresso: 88,
     mensagem: 'Consolidando publicacoes e indicadores de gestao...' });
 
-  var ss   = SpreadsheetApp.getActive();
+  var ss   = planilha_();
   var aba  = ss.getSheetByName(cfg_('ABA_BASE'));
   var abaD = ss.getSheetByName(ABA_DJEN);
   var ult  = aba.getLastRow();
@@ -511,10 +511,27 @@ function etapaConsolidar_(cur, t0) {
 
 function props_() { return PropertiesService.getScriptProperties(); }
 
+/**
+ * A planilha de trabalho. Funciona nos dois modos:
+ *  - script vinculado a planilha  -> getActive()
+ *  - projeto independente          -> openById(PLANILHA_ID)
+ */
+var _SS = null;
+function planilha_() {
+  if (_SS) return _SS;
+  try { _SS = SpreadsheetApp.getActive(); } catch (e) { _SS = null; }
+  if (!_SS) {
+    var id = (props_().getProperty('cfg_PLANILHA_ID') || CFG_PADRAO.PLANILHA_ID || '').trim();
+    if (!id) throw new Error('Defina PLANILHA_ID em CFG_PADRAO: o script nao esta vinculado a uma planilha.');
+    _SS = SpreadsheetApp.openById(id);
+  }
+  return _SS;
+}
+
 function cfg_(chave) {
   var cache = props_().getProperty('cfg_' + chave);
   if (cache) return cache;
-  var aba = SpreadsheetApp.getActive().getSheetByName(ABA_CFG);
+  var aba = planilha_().getSheetByName(ABA_CFG);
   if (aba) {
     var v = aba.getDataRange().getValues();
     for (var i = 0; i < v.length; i++) {
@@ -601,7 +618,7 @@ function garantirCabecalho_(ss) {
 }
 
 function gravarSync_(obj) {
-  var aba = garantirSync_(SpreadsheetApp.getActive());
+  var aba = garantirSync_(planilha_());
   SYNC_ORDEM.forEach(function (k, i) {
     if (obj[k] !== undefined) aba.getRange(i + 1, 2).setValue(obj[k]);
   });
@@ -609,7 +626,7 @@ function gravarSync_(obj) {
 }
 
 function lerSync_() {
-  var aba = garantirSync_(SpreadsheetApp.getActive());
+  var aba = garantirSync_(planilha_());
   var v = aba.getRange(1, 2, SYNC_ORDEM.length, 1).getDisplayValues();
   var o = {};
   SYNC_ORDEM.forEach(function (k, i) { o[k] = v[i][0]; });

@@ -73,7 +73,11 @@ sincronização, lido pelo dashboard) e `_DJEN` (publicações brutas, uma por l
 
 ## Instalação do motor (uma vez)
 
-1. Abra a planilha › **Extensões › Apps Script**.
+1. Abra a planilha › **Extensões › Apps Script** (script vinculado — é o que faz
+   aparecer o menu *BM · DataJud/DJEN* dentro da planilha). Um projeto **independente**
+   criado direto no script.google.com também funciona: nesse caso `SpreadsheetApp.getActive()`
+   volta `null` e o motor abre a planilha por `PLANILHA_ID` — só não haverá menu na planilha,
+   as funções são executadas pelo seletor de função do editor.
 2. Crie dois arquivos e cole o conteúdo de `apps-script/Codigo.gs` e `apps-script/Fontes.gs`.
 3. Rode a função **`configurarTudo`** e autorize os acessos pedidos.
    Isso cria as abas de apoio, ajusta o cabeçalho e agenda o gatilho das **6h**.
@@ -90,6 +94,7 @@ sincronização, lido pelo dashboard) e `_DJEN` (publicações brutas, uma por l
 
 | Chave | Para que serve |
 |-------|----------------|
+| `PLANILHA_ID` | ID da planilha de destino. Só é usado quando o script é um projeto independente. |
 | `INCLUIR_PLANILHA_MAE` | `SO_SE_VAZIA` (padrão — preserva a lista curada), `SEMPRE` (junta os ~2.950 processos da planilha-mãe) ou `NUNCA`. Em qualquer opção a planilha-mãe enriquece partes, cliente e valor da causa. |
 | `OABS` | OABs do escritório usadas na varredura do DJEN — `41438/BA, 63805/BA`. Acrescente as demais para ampliar a cobertura. |
 | `DJEN_DATA_INICIAL` | Início da varredura histórica (padrão `2023-01-01`). |

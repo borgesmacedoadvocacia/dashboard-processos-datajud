@@ -26,6 +26,9 @@
 /* --------------------------- CONFIGURACAO ------------------------------- */
 
 var CFG_PADRAO = {
+  /* ID desta planilha. So e usado quando o script roda como projeto
+     independente (nao vinculado a planilha) - ai getActive() volta null. */
+  PLANILHA_ID:         '1MXpGlo3U1bDV34l_jj98ZNPwgguvD-hCFOCaARNQaYs',
   ABA_BASE:            'Base geral',
   PLANILHA_MAE_ID:     '1XKMeYEapBqBq_IIaLu2uN-ceB3btArIYmrPBuyxsLHU',
   PLANILHA_MAE_ABA:    'Todos os Processos',
@@ -81,7 +84,7 @@ function onOpen() {
 
 /** Cria abas de apoio, cabecalhos e o gatilho diario das 6h. */
 function configurarTudo() {
-  var ss = SpreadsheetApp.getActive();
+  var ss = planilha_();
   garantirConfig_(ss);
   garantirSync_(ss);
   garantirDJEN_(ss);
@@ -119,7 +122,7 @@ function continuarSincronizacao()    { limparGatilhosContinuacao_();            
  * esteja aqui, sem esperar a proxima sincronizacao. Nao remove nada.
  */
 function importarDaPlanilhaMae() {
-  var ss = SpreadsheetApp.getActive();
+  var ss = planilha_();
   garantirConfig_(ss); garantirSync_(ss); garantirDJEN_(ss); garantirCabecalho_(ss);
   var aba = ss.getSheetByName(cfg_('ABA_BASE'));
   var antes = Math.max(0, aba.getLastRow() - 1);
@@ -187,7 +190,7 @@ function doGet(e) {
 /* --------------------------- ORQUESTRACAO ------------------------------- */
 
 function iniciarSincronizacao_(modo, origem) {
-  var ss = SpreadsheetApp.getActive();
+  var ss = planilha_();
   garantirConfig_(ss); garantirSync_(ss); garantirDJEN_(ss); garantirCabecalho_(ss);
   props_().setProperty('cursor', JSON.stringify({ etapa: 'base', modo: modo, i: 0 }));
   gravarSync_({
@@ -251,7 +254,7 @@ function finalizar_() {
 
 function etapaBase_(cur) {
   gravarSync_({ etapa: 'base', progresso: 3, mensagem: 'Montando a base de processos...' });
-  var ss = SpreadsheetApp.getActive();
+  var ss = planilha_();
   var aba = ss.getSheetByName(cfg_('ABA_BASE'));
 
   /* 1a. processos ja na planilha — esta lista manda; a planilha-mae so enriquece */
