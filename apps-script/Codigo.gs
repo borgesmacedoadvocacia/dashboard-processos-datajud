@@ -29,7 +29,7 @@ var CFG_PADRAO = {
   ABA_BASE:            'Base geral',
   PLANILHA_MAE_ID:     '1XKMeYEapBqBq_IIaLu2uN-ceB3btArIYmrPBuyxsLHU',
   PLANILHA_MAE_ABA:    'Todos os Processos',
-  INCLUIR_PLANILHA_MAE:'SO_SE_VAZIA',
+  INCLUIR_PLANILHA_MAE:'SEMPRE',
   OABS:                '41438/BA, 63805/BA',
   DJEN_DATA_INICIAL:   '2023-01-01',
   DJEN_JANELA_DIAS:    '45',
@@ -70,6 +70,7 @@ function onOpen() {
     .addItem('Sincronizar agora (completa)', 'sincronizarCompletaMenu')
     .addItem('Sincronizar incremental', 'sincronizarIncrementalMenu')
     .addSeparator()
+    .addItem('Importar processos da planilha-mae', 'importarDaPlanilhaMae')
     .addItem('Configurar tudo (1a vez)', 'configurarTudo')
     .addItem('Recriar gatilho das 6h', 'criarGatilhoDiario')
     .addItem('Cancelar sincronizacao', 'cancelarSincronizacao')
@@ -110,6 +111,36 @@ function sincronizacaoDiaria()       { iniciarSincronizacao_('completa', 'gatilh
 function sincronizarCompletaMenu()   { iniciarSincronizacao_('completa', 'menu');        executarEtapas_(); }
 function sincronizarIncrementalMenu(){ iniciarSincronizacao_('incremental', 'menu');     executarEtapas_(); }
 function continuarSincronizacao()    { limparGatilhosContinuacao_();                     executarEtapas_(); }
+
+/**
+ * Traz para a Base geral todo processo de "Clientes e Processos" que ainda nao
+ * esteja aqui, sem esperar a proxima sincronizacao. Nao remove nada.
+ */
+function importarDaPlanilhaMae() {
+  var ss = SpreadsheetApp.getActive();
+  garantirConfig_(ss); garantirSync_(ss); garantirDJEN_(ss); garantirCabecalho_(ss);
+  var aba = ss.getSheetByName(cfg_('ABA_BASE'));
+  var antes = Math.max(0, aba.getLastRow() - 1);
+  props_().setProperty('forcarSemear', '1');
+  try {
+    etapaBase_({ modo: 'completa' });
+  } finally {
+    props_().deleteProperty('forcarSemear');
+  }
+  var depois = Math.max(0, aba.getLastRow() - 1);
+  gravarSync_({ status: 'ocioso', etapa: 'importacao',
+    mensagem: 'Importados ' + (depois - antes) + ' processos da planilha-mae.' });
+  try {
+    SpreadsheetApp.getUi().alert([
+      'Importacao concluida.',
+      '',
+      (depois - antes) + ' processos novos vieram de "Clientes e Processos".',
+      'Base geral: ' + depois + ' processos.',
+      '',
+      'Rode "Sincronizar agora (completa)" para buscar os dados deles no DataJud e no DJEN.'
+    ].join('\n'));
+  } catch (e) {}
+}
 
 function cancelarSincronizacao() {
   limparGatilhosContinuacao_();
@@ -288,8 +319,10 @@ function etapaBase_(cur) {
 
   /* 1d. semeia a base pela planilha-mae — por padrao SO se a aba estiver vazia,
          para nao inflar uma lista de processos curada a mao */
-  var modoMae = norm_(cfg_('INCLUIR_PLANILHA_MAE') || 'SO_SE_VAZIA');
-  var semear = modoMae.indexOf('sempre') === 0 || (modoMae.indexOf('so_se_vazia') === 0 && !ordem.length);
+  var modoMae = norm_(cfg_('INCLUIR_PLANILHA_MAE') || 'SEMPRE');
+  var semear = props_().getProperty('forcarSemear') === '1' ||
+               modoMae.indexOf('sempre') === 0 ||
+               (modoMae.indexOf('so_se_vazia') === 0 && !ordem.length);
   if (semear) {
     Object.keys(meta).forEach(function (num) {
       if (existentes[num]) return;

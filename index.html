@@ -4,16 +4,34 @@
 <meta charset="UTF-8" />
 <script>
 /* Central BM — o acesso a este dashboard é pela central única.
-   Link antigo/acesso direto é remanejado para a central; dentro dela,
-   com a sessão ativa, a página abre normalmente. */
+   Acesso direto é remanejado para a central. Dentro dela, além da sessão
+   ativa, o PERFIL precisa estar autorizado: só Administração e Lideranças.
+   A Equipe, mesmo logada na central, é remanejada de volta. */
 (function () {
-  var PORTAL = 'https://borgesmacedoadvocacia.github.io/';
+  var PORTAL  = 'https://borgesmacedoadvocacia.github.io/';
+  var PERFIS  = ['administracao', 'liderancas'];
   if (location.protocol === 'file:' || location.hostname === 'localhost' || location.hostname === '127.0.0.1') return;
   function ir() { try { window.top.location.replace(PORTAL); } catch (e) { location.replace(PORTAL); } }
   if (window.self === window.top) { ir(); return; }
-  var ok = false;
-  try { ok = sessionStorage.getItem('bm_portal_auth') === '1'; } catch (e) {}
-  if (!ok) { ir(); return; }
+  var ok = false, perfil = '', noMenu = false;
+  try {
+    ok = sessionStorage.getItem('bm_portal_auth') === '1';
+    var s = JSON.parse(sessionStorage.getItem('bm_portal_sessao') || 'null');
+    perfil = (s && s.perfil) ? String(s.perfil) : '';
+    /* fonte de verdade: este painel está no menu que o perfil recebeu? */
+    if (s && s.grupos) {
+      for (var g = 0; g < s.grupos.length && !noMenu; g++) {
+        var itens = s.grupos[g].itens || [];
+        for (var i = 0; i < itens.length; i++) {
+          if (itens[i] && itens[i].id === 'processos-datajud') { noMenu = true; break; }
+        }
+      }
+    }
+  } catch (e) {}
+  var norm = function (t) {
+    return String(t).trim().toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '');
+  };
+  if (!ok || !(noMenu || PERFIS.indexOf(norm(perfil)) >= 0)) { ir(); return; }
   document.documentElement.setAttribute('data-portal', '1');
 })();
 </script>
