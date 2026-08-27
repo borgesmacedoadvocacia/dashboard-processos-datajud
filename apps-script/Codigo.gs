@@ -52,14 +52,16 @@ var DJEN_ITENS_PAG   = 500;
 var DJEN_PAUSA_MS    = 3300;              // limite observado: 20 req/min
 var MAX_CHARS_CEL    = 45000;             // teto seguro por celula (limite 50k)
 
+/* Os nomes abaixo sao reescritos na linha 1 da Base geral. Mantidos exatamente
+   como estao na planilha (as 15 primeiras) para nao desfigurar o cabecalho. */
 var COLUNAS = [
-  'Tipo de Processo','Numero do Processo','Partes','Tribunal','Vara','Grau','Classe',
-  'Assunto','Orgao Julgador','Data do Ajuizamento','Sistema','Formato','Nivel de Sigilo',
-  'Movimentos','Publicacoes no DJEN',
-  /* gestao */
-  'Ultima Atualizacao','Qtd. Movimentos','Data Ultima Movimentacao','Ultima Movimentacao',
-  'Dias sem Movimentacao','Qtd. Publicacoes','Data Ultima Publicacao','Ultima Publicacao',
-  'Fase Processual','Situacao','Valor da Causa','Cliente / Parte Representada','Origem do Cadastro'
+  'Tipo de Processo','Número do Processo','Partes','Tribunal','Vara','Grau','Classe',
+  'Assunto','Órgão Julgador','Data do Ajuizamento','Sistema','Formato','Nível de Sigilo',
+  'Movimentos','Publicações no DJEN',
+  /* gestão */
+  'Última Atualização','Qtd. Movimentos','Data da Última Movimentação','Última Movimentação',
+  'Dias sem Movimentação','Qtd. Publicações','Data da Última Publicação','Última Publicação',
+  'Fase Processual','Situação','Valor da Causa','Cliente / Parte Representada','Origem do Cadastro'
 ];
 
 /* --------------------------- MENU / SETUP ------------------------------- */
