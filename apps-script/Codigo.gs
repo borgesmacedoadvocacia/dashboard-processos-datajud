@@ -33,7 +33,8 @@ var CFG_PADRAO = {
   PLANILHA_MAE_ID:     '1XKMeYEapBqBq_IIaLu2uN-ceB3btArIYmrPBuyxsLHU',
   PLANILHA_MAE_ABA:    'Todos os Processos',
   INCLUIR_PLANILHA_MAE:'SEMPRE',
-  OABS:                '41438/BA, 63805/BA',
+  /* OABs varridas no DJEN. Aceita "41438/BA", "BA/41438" ou "OAB/BA 41438". */
+  OABS:                '41438/BA, 271081/RJ, 536843/SP, 63805/BA',
   DJEN_DATA_INICIAL:   '2023-01-01',
   DJEN_JANELA_DIAS:    '45',
   DATAJUD_APIKEY:      'APIKey cDZHYzlZa0JadVREZDJCendQbXY6SkJlTzNjLV9TRENyQk1RdnFKZGRQdw==',
@@ -79,6 +80,7 @@ function onOpen() {
     .addItem('Sincronizar incremental', 'sincronizarIncrementalMenu')
     .addSeparator()
     .addItem('Importar processos da planilha-mae', 'importarDaPlanilhaMae')
+    .addItem('Aplicar OABs padrao no _Config', 'aplicarOABsPadrao')
     .addItem('Configurar tudo (1a vez)', 'configurarTudo')
     .addItem('Recriar gatilho das 6h', 'criarGatilhoDiario')
     .addItem('Cancelar sincronizacao', 'cancelarSincronizacao')

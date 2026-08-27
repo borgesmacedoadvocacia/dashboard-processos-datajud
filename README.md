@@ -104,7 +104,7 @@ sincronização, lido pelo dashboard) e `_DJEN` (publicações brutas, uma por l
 |-------|----------------|
 | `PLANILHA_ID` | ID da planilha de destino. Só é usado quando o script é um projeto independente. |
 | `INCLUIR_PLANILHA_MAE` | `SO_SE_VAZIA` (padrão — preserva a lista curada), `SEMPRE` (junta os ~2.950 processos da planilha-mãe) ou `NUNCA`. Em qualquer opção a planilha-mãe enriquece partes, cliente e valor da causa. |
-| `OABS` | OABs do escritório usadas na varredura do DJEN — `41438/BA, 63805/BA`. Acrescente as demais para ampliar a cobertura. |
+| `OABS` | OABs varridas no DJEN — `41438/BA, 271081/RJ, 536843/SP, 63805/BA`. Aceita `41438/BA`, `BA/41438` ou `OAB/BA 41438`; duplicatas são ignoradas. Depois de mexer no padrão do código, rode **Aplicar OABs padrao no _Config** (o `_Config` tem precedência sobre o código). |
 | `DJEN_DATA_INICIAL` | Início da varredura histórica (padrão `2023-01-01`). |
 | `DJEN_JANELA_DIAS` | Janela das varreduras seguintes (padrão 45 dias). |
 | `DESCOBRIR_NO_DJEN` | `SIM` inclui na base processos que aparecem no DJEN e não estão na planilha-mãe. |
@@ -134,6 +134,8 @@ A chave da API fica **apenas no navegador** (`localStorage`), nunca no repositó
 - **Cobertura do DataJud** gira em torno de 85–90% dos processos: números em segredo de
   justiça, tribunais que não alimentam a base e números digitados errado ficam como
   *“Sem dados nas fontes”* — o dashboard tem um alerta próprio para eles.
+- **OAB/RJ 271081** existe, mas hoje não tem nenhuma publicação no DJEN (conferido em 27/08/2026,
+  período completo desde 2023). Fica configurada assim mesmo: se passar a receber, entra sozinha.
 - **DJEN** limita ~20 requisições por minuto; a varredura por OAB (500 itens por página)
   contorna o limite. Publicações anteriores ao DJEN (2023) não existem na fonte.
 - **Sheets** aceita no máximo 50 mil caracteres por célula; processos muito longos têm as

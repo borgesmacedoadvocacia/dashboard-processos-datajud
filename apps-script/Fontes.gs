@@ -548,11 +548,24 @@ function cfg_(chave) {
   return CFG_PADRAO[chave] || '';
 }
 
+/**
+ * Le a lista de OABs do _Config. Tolerante ao formato: "41438/BA", "BA/41438",
+ * "OAB/BA 41438" e "41438 BA" caem todos no mesmo lugar. Duplicatas somem.
+ */
 function listaOABs_() {
-  return String(cfg_('OABS')).split(/[,;]/).map(function (s) {
-    var m = String(s).trim().match(/(\d+[A-Za-z\-]*)\s*\/\s*([A-Za-z]{2})/);
-    return m ? { n: m[1], uf: m[2].toUpperCase() } : null;
-  }).filter(Boolean);
+  var vistos = {}, saida = [];
+  String(cfg_('OABS')).split(/[,;\n]/).forEach(function (parte) {
+    var t = String(parte).replace(/oab/ig, ' ').trim();
+    if (!t) return;
+    var numero = (t.match(/\d+[A-Za-z\-]*/) || [])[0];
+    var uf = (t.match(/(?:^|[^A-Za-z])([A-Za-z]{2})(?:[^A-Za-z]|$)/) || [])[1];
+    if (!numero || !uf) return;
+    var chave = numero + '/' + uf.toUpperCase();
+    if (vistos[chave]) return;
+    vistos[chave] = 1;
+    saida.push({ n: numero, uf: uf.toUpperCase() });
+  });
+  return saida;
 }
 
 function garantirConfig_(ss) {
@@ -582,8 +595,41 @@ function garantirConfig_(ss) {
     aba.getRange(1, 1, 1, 3).setFontWeight('bold');
     aba.setColumnWidth(1, 190); aba.setColumnWidth(2, 380); aba.setColumnWidth(3, 430);
   }
+  else {
+    /* _Config ja existe: acrescenta apenas as chaves que ainda nao estao la,
+       sem tocar em nada que o usuario tenha ajustado. */
+    var v = aba.getDataRange().getValues();
+    var tem = {};
+    for (var i = 0; i < v.length; i++) tem[String(v[i][0]).trim()] = 1;
+    var faltando = Object.keys(CFG_PADRAO).filter(function (k) { return !tem[k]; });
+    if (faltando.length) {
+      aba.getRange(v.length + 1, 1, faltando.length, 2).setValues(
+        faltando.map(function (k) { return [k, CFG_PADRAO[k]]; }));
+    }
+  }
   Object.keys(CFG_PADRAO).forEach(function (k) { props_().deleteProperty('cfg_' + k); });
   return aba;
+}
+
+/**
+ * Repoe no _Config a lista de OABs padrao do codigo. Util depois de acrescentar
+ * uma OAB nova no CFG_PADRAO, ja que o _Config tem precedencia sobre ele.
+ */
+function aplicarOABsPadrao() {
+  var aba = garantirConfig_(planilha_());
+  var v = aba.getDataRange().getValues();
+  for (var i = 0; i < v.length; i++) {
+    if (String(v[i][0]).trim() === 'OABS') {
+      aba.getRange(i + 1, 2).setValue(CFG_PADRAO.OABS);
+      break;
+    }
+  }
+  props_().deleteProperty('cfg_OABS');
+  var lidas = listaOABs_().map(function (o) { return o.n + '/' + o.uf; }).join(', ');
+  gravarSync_({ mensagem: 'OABs do DJEN: ' + lidas });
+  try {
+    SpreadsheetApp.getUi().alert('OABs atualizadas no _Config:\n\n' + lidas);
+  } catch (e) {}
 }
 
 var SYNC_ORDEM = ['status', 'etapa', 'inicio', 'fim', 'progresso', 'mensagem',
