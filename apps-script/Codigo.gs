@@ -179,7 +179,7 @@ function executarEtapas_() {
       else if (cur.etapa === 'datajud')    cur = etapaDataJud_(cur, t0);
       else if (cur.etapa === 'djen')       cur = etapaDJEN_(cur, t0);
       else if (cur.etapa === 'descobrir')  cur = etapaDescobrir_(cur);
-      else if (cur.etapa === 'consolidar') cur = etapaConsolidar_(cur);
+      else if (cur.etapa === 'consolidar') cur = etapaConsolidar_(cur, t0);
       else { finalizar_(); break; }
 
       props_().setProperty('cursor', JSON.stringify(cur));

@@ -50,10 +50,10 @@ function etapaDataJud_(cur, t0) {
       (grupos[ep] = grupos[ep] || []).push(n);
     });
 
-    var reqs = [], eps = [];
+    var reqs = [], numsPorReq = [];
     Object.keys(grupos).forEach(function (ep) {
       for (var i = 0; i < grupos[ep].length; i += LOTE_DATAJUD) {
-        eps.push(ep);
+        numsPorReq.push(grupos[ep].slice(i, i + LOTE_DATAJUD));
         reqs.push({
           url: 'https://api-publica.datajud.cnj.jus.br/' + ep + '/_search',
           method: 'post', contentType: 'application/json', muteHttpExceptions: true,
@@ -66,14 +66,17 @@ function etapaDataJud_(cur, t0) {
       }
     });
 
-    var porNumero = {};
+    var porNumero = {}, consultados = {};
     if (reqs.length) {
       var resp = [];
       try { resp = UrlFetchApp.fetchAll(reqs); }
       catch (e) { Utilities.sleep(5000); try { resp = UrlFetchApp.fetchAll(reqs); } catch (e2) { resp = []; } }
-      resp.forEach(function (r) {
+      resp.forEach(function (r, ri) {
         if (!r || r.getResponseCode() !== 200) return;
         var body; try { body = JSON.parse(r.getContentText()); } catch (e) { return; }
+        /* a consulta desses numeros foi respondida: o que nao voltou e porque
+           a fonte nao tem - a linha pode ser limpa sem risco de apagar dado bom */
+        (numsPorReq[ri] || []).forEach(function (n) { consultados[n] = 1; });
         var hits = (body.hits && body.hits.hits) || [];
         hits.forEach(function (h) {
           var s = h._source || {};
@@ -83,7 +86,7 @@ function etapaDataJud_(cur, t0) {
       });
     }
 
-    /* le o que ja existe no bloco para preservar linhas sem retorno */
+    /* le o bloco: linhas cuja consulta falhou ficam como estao */
     var colA  = aba.getRange(linhaIni, 1, qtd, 1).getValues();
     var colDM = aba.getRange(linhaIni, 4, qtd, 10).getValues();
     var colN  = aba.getRange(linhaIni, 14, qtd, 1).getValues();
@@ -92,15 +95,23 @@ function etapaDataJud_(cur, t0) {
 
     for (var i2 = 0; i2 < qtd; i2++) {
       var regs = porNumero[nums[i2]];
-      if (!regs || !regs.length) continue;
-      var d = consolidarDataJud_(regs, maxMov);
-      movTotal += d.qtdMov;
-      if (d.tipo) colA[i2][0] = d.tipo;
-      colDM[i2] = [d.tribunal, d.vara, d.grau, d.classe, d.assunto, d.orgao,
-                   d.ajuizamento, d.sistema, d.formato, d.sigilo];
-      colN[i2][0]  = d.movimentos;
-      colQS[i2]    = [d.qtdMov, d.ultMovData, d.ultMovNome];
-      colX[i2][0]  = d.fase;
+      if (regs && regs.length) {
+        /* a planilha reflete sempre a ultima pesquisa: sobrescreve tudo */
+        var d = consolidarDataJud_(regs, maxMov);
+        movTotal += d.qtdMov;
+        if (d.tipo) colA[i2][0] = d.tipo;
+        colDM[i2] = [d.tribunal, d.vara, d.grau, d.classe, d.assunto, d.orgao,
+                     d.ajuizamento, d.sistema, d.formato, d.sigilo];
+        colN[i2][0]  = d.movimentos;
+        colQS[i2]    = [d.qtdMov, d.ultMovData, d.ultMovNome];
+        colX[i2][0]  = d.fase;
+      } else if (consultados[nums[i2]]) {
+        /* consultado e sem retorno: limpa para nao deixar dado velho na planilha */
+        colDM[i2]   = ['', '', '', '', '', '', '', '', '', ''];
+        colN[i2][0] = '';
+        colQS[i2]   = ['', '', ''];
+        colX[i2][0] = '';
+      }
     }
 
     aba.getRange(linhaIni, 1, qtd, 1).setValues(colA);
@@ -372,7 +383,9 @@ function periodoDJEN_(modo) {
   var hoje = new Date();
   var fim = Utilities.formatDate(hoje, tz, 'yyyy-MM-dd');
   var ini;
-  if (modo === 'completa' && !lerSync_().ultimaOk) {
+  if (modo === 'completa') {
+    /* completa = varredura do periodo inteiro toda vez, para a planilha
+       refletir exatamente o que o DJEN tem hoje */
     ini = cfg_('DJEN_DATA_INICIAL');
   } else {
     var dias = Number(cfg_('DJEN_JANELA_DIAS')) || 45;
@@ -394,7 +407,7 @@ function fetchComRetentativa_(url) {
 
 /* ------------------ ETAPA 4 - CONSOLIDAR / GESTAO ----------------------- */
 
-function etapaConsolidar_(cur) {
+function etapaConsolidar_(cur, t0) {
   gravarSync_({ etapa: 'consolidar', progresso: 88,
     mensagem: 'Consolidando publicacoes e indicadores de gestao...' });
 
@@ -425,13 +438,24 @@ function etapaConsolidar_(cur) {
   var agora    = new Date();
   var carimbo  = Utilities.formatDate(agora, tz, 'dd/MM/yyyy HH:mm');
 
-  var nums  = aba.getRange(2, 2, qtdL, 1).getValues();
-  var colQS = aba.getRange(2, 17, qtdL, 3).getValues();   // Q,R,S
-  var colX  = aba.getRange(2, 24, qtdL, 1).getValues();   // X - fase
+  /* fatiado por tempo: a coluna O carrega o texto integral das publicacoes */
+  var ini      = Math.max(0, Number(cur.off || 0));
+  var FATIA    = 150;
+  var fim      = Math.min(qtdL, ini + FATIA * 12);
+  var qtdF     = fim - ini;
+  if (qtdF <= 0) {
+    gravarSync_({ progresso: 98, mensagem: 'Indicadores de gestao recalculados.' });
+    return { etapa: 'fim', modo: cur.modo };
+  }
 
-  var outOP = [], outTW = [], outY = [], totalPub = 0;
+  var nums  = aba.getRange(2 + ini, 2, qtdF, 1).getValues();
+  var colQS = aba.getRange(2 + ini, 17, qtdF, 3).getValues();   // Q,R,S
+  var colX  = aba.getRange(2 + ini, 24, qtdF, 1).getValues();   // X - fase
 
-  for (var r2 = 0; r2 < qtdL; r2++) {
+  var outOP = [], outTW = [], outY = [], totalPub = Number(lerSync_().publicacoes || 0);
+  if (ini === 0) totalPub = 0;
+
+  for (var r2 = 0; r2 < qtdF; r2++) {
     var num = soDigitos_(nums[r2][0]);
     var lista = (pubs[num] || []).sort(function (a, b) {
       return String(b.data).localeCompare(String(a.data));
@@ -467,16 +491,20 @@ function etapaConsolidar_(cur) {
     outY.push([sit]);
   }
 
-  for (var off = 0; off < qtdL; off += 500) {
-    var n2 = Math.min(500, qtdL - off);
-    aba.getRange(2 + off, 15, n2, 2).setValues(outOP.slice(off, off + n2));
-    aba.getRange(2 + off, 20, n2, 4).setValues(outTW.slice(off, off + n2));
-    aba.getRange(2 + off, 25, n2, 1).setValues(outY.slice(off, off + n2));
+  for (var off = 0; off < qtdF; off += FATIA) {
+    var n2 = Math.min(FATIA, qtdF - off);
+    var base = 2 + ini + off;
+    aba.getRange(base, 15, n2, 2).setValues(outOP.slice(off, off + n2));
+    aba.getRange(base, 20, n2, 4).setValues(outTW.slice(off, off + n2));
+    aba.getRange(base, 25, n2, 1).setValues(outY.slice(off, off + n2));
   }
 
-  gravarSync_({ progresso: 98, publicacoes: totalPub, processos: qtdL,
-    mensagem: 'Indicadores de gestao recalculados.' });
-  return { etapa: 'fim', modo: cur.modo };
+  gravarSync_({ progresso: 88 + Math.round(10 * fim / qtdL), publicacoes: totalPub,
+    processos: qtdL,
+    mensagem: fim >= qtdL ? 'Indicadores de gestao recalculados.'
+                          : 'Consolidando: ' + fim + '/' + qtdL + ' processos.' });
+  if (fim >= qtdL) return { etapa: 'fim', modo: cur.modo };
+  return { etapa: 'consolidar', modo: cur.modo, off: fim, novos: cur.novos };
 }
 
 /* ---------------------------- UTILITARIOS ------------------------------- */

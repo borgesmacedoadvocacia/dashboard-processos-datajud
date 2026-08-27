@@ -28,10 +28,19 @@ dashboard. Cada execução:
    é deduzido do próprio número CNJ). Preenche tribunal, vara, grau, classe, assunto,
    órgão julgador, ajuizamento, sistema, formato, sigilo e **todas as movimentações**.
 3. **Varre o DJEN** pelas OABs do escritório e guarda **todas as publicações**,
-   sem repetir (dedupe pelo `id` da comunicação, na aba `_DJEN`).
+   sem repetir (dedupe pelo `id` da comunicação, na aba `_DJEN`). Na sincronização
+   *completa* — a das 6h e a do botão *Atualizar* — a varredura cobre **todo o
+   período** (desde `DJEN_DATA_INICIAL`), não só os últimos dias.
 4. **Descobre processos novos** — o que apareceu no DJEN e não estava na base entra
    como linha nova e vai ao DataJud na mesma execução.
 5. **Recalcula os indicadores de gestão** (fase, dias parado, situação, últimos eventos).
+
+**A planilha é sempre sobrescrita.** Cada pesquisa regrava as colunas que vêm das
+fontes (A, D–O e P–Y) com o resultado da consulta daquele momento — nada de dado
+velho sobrevivendo ao lado de dado novo. Se o DataJud responde e o processo não
+existe mais lá, as colunas dele são **limpas**; se a consulta em si falhou
+(erro de rede ou do CNJ), a linha fica intocada até a próxima rodada. As colunas
+preenchidas à mão ou vindas da planilha-mãe (C, Z, AA) nunca são sobrescritas.
 
 Execuções longas se retomam sozinhas: o script grava um cursor e cria um gatilho de
 continuação antes de estourar o limite de 6 minutos do Apps Script.
