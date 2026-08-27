@@ -514,6 +514,7 @@ function garantirConfig_(ss) {
       ABA_BASE: 'Aba onde os dados sao gravados',
       PLANILHA_MAE_ID: 'ID da planilha "Clientes e Processos" (fonte da base)',
       PLANILHA_MAE_ABA: 'Aba da planilha-mae',
+      INCLUIR_PLANILHA_MAE: 'SO_SE_VAZIA (semeia a base so quando a aba esta vazia) | SEMPRE (junta os ~2.950 processos da planilha-mae) | NUNCA. Em qualquer opcao a planilha-mae enriquece partes, cliente e valor da causa.',
       OABS: 'OABs do escritorio usadas na varredura do DJEN (numero/UF, separadas por virgula)',
       DJEN_DATA_INICIAL: 'Data inicial da 1a varredura historica do DJEN',
       DJEN_JANELA_DIAS: 'Janela (dias) das varreduras seguintes',

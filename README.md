@@ -20,8 +20,10 @@ DataJud (API pública CNJ)  ───────────┘
 O motor roda **todo dia às 6h** e **sempre que o botão “Atualizar” é clicado** no
 dashboard. Cada execução:
 
-1. **Monta a base** — números de processo da planilha-mãe *Clientes e Processos*
-   (~2.950 processos) somados aos que já estão na `Base geral`.
+1. **Monta a base** — a lista de números que já está na `Base geral` **manda**
+   (hoje, 2.714 processos curados). A planilha-mãe *Clientes e Processos* é usada
+   para **enriquecer** partes, cliente e valor da causa; ela só semeia números novos
+   quando a aba está vazia (ajustável em `INCLUIR_PLANILHA_MAE`).
 2. **Consulta o DataJud** em lote, agrupando os processos por tribunal (o endpoint
    é deduzido do próprio número CNJ). Preenche tribunal, vara, grau, classe, assunto,
    órgão julgador, ajuizamento, sistema, formato, sigilo e **todas as movimentações**.
@@ -79,6 +81,7 @@ sincronização, lido pelo dashboard) e `_DJEN` (publicações brutas, uma por l
 
 | Chave | Para que serve |
 |-------|----------------|
+| `INCLUIR_PLANILHA_MAE` | `SO_SE_VAZIA` (padrão — preserva a lista curada), `SEMPRE` (junta os ~2.950 processos da planilha-mãe) ou `NUNCA`. Em qualquer opção a planilha-mãe enriquece partes, cliente e valor da causa. |
 | `OABS` | OABs do escritório usadas na varredura do DJEN — `41438/BA, 63805/BA`. Acrescente as demais para ampliar a cobertura. |
 | `DJEN_DATA_INICIAL` | Início da varredura histórica (padrão `2023-01-01`). |
 | `DJEN_JANELA_DIAS` | Janela das varreduras seguintes (padrão 45 dias). |

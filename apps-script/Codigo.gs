@@ -29,6 +29,7 @@ var CFG_PADRAO = {
   ABA_BASE:            'Base geral',
   PLANILHA_MAE_ID:     '1XKMeYEapBqBq_IIaLu2uN-ceB3btArIYmrPBuyxsLHU',
   PLANILHA_MAE_ABA:    'Todos os Processos',
+  INCLUIR_PLANILHA_MAE:'SO_SE_VAZIA',
   OABS:                '41438/BA, 63805/BA',
   DJEN_DATA_INICIAL:   '2023-01-01',
   DJEN_JANELA_DIAS:    '45',
@@ -220,18 +221,23 @@ function etapaBase_(cur) {
   var ss = SpreadsheetApp.getActive();
   var aba = ss.getSheetByName(cfg_('ABA_BASE'));
 
-  /* 1a. processos ja na planilha */
+  /* 1a. processos ja na planilha — esta lista manda; a planilha-mae so enriquece */
   var existentes = {};
   var ordem = [];
   var ult = aba.getLastRow();
+  var colC = [], colZAB = [], linhas = [];
   if (ult > 1) {
-    var vals = aba.getRange(2, 1, ult - 1, 28).getValues();
-    for (var i = 0; i < vals.length; i++) {
-      var n = soDigitos_(vals[i][1]);
+    var qtdL = ult - 1;
+    var nums = aba.getRange(2, 2, qtdL, 1).getValues();
+    colC   = aba.getRange(2, 3, qtdL, 1).getValues();
+    colZAB = aba.getRange(2, 26, qtdL, 3).getValues();
+    for (var i = 0; i < qtdL; i++) {
+      var n = soDigitos_(nums[i][0]);
       if (n.length !== 20 || existentes[n]) continue;
-      existentes[n] = { linha: i + 2, origem: vals[i][27] };
+      existentes[n] = { linha: i + 2, idx: i, origem: colZAB[i][2] };
       ordem.push(n);
     }
+    linhas = nums;
   }
 
   /* 1b. planilha-mae "Clientes e Processos" */
@@ -258,17 +264,41 @@ function etapaBase_(cur) {
           valor:   cVal >= 0 ? mv[r][cVal] : '',
           cliente: cPar >= 0 ? String(mv[r][cPar] || '').trim() : ''
         };
-        if (!existentes[num]) {
-          existentes[num] = { linha: 0, origem: 'Clientes e Processos' };
-          ordem.push(num);
-        }
       }
     }
   } catch (e) {
     gravarSync_({ mensagem: 'Aviso: planilha-mae nao pode ser lida (' + e.message + '). Seguindo com a base atual.' });
   }
 
-  /* 1c. grava esqueleto das linhas que ainda nao existem
+  /* 1c. enriquece as linhas que ja estao na planilha (sem sobrescrever o que
+         alguem preencheu a mao) */
+  if (ordem.length) {
+    var mudouC = false, mudouZ = false;
+    ordem.forEach(function (n) {
+      var e = existentes[n]; if (e.idx == null) return;
+      var m = meta[n]; if (!m) return;
+      if (!String(colC[e.idx][0] || '').trim() && m.partes) { colC[e.idx][0] = m.partes; mudouC = true; }
+      if (!String(colZAB[e.idx][0] || '').trim() && m.valor)   { colZAB[e.idx][0] = m.valor;   mudouZ = true; }
+      if (!String(colZAB[e.idx][1] || '').trim() && m.cliente) { colZAB[e.idx][1] = m.cliente; mudouZ = true; }
+      if (!String(colZAB[e.idx][2] || '').trim())              { colZAB[e.idx][2] = 'Clientes e Processos'; mudouZ = true; }
+    });
+    if (mudouC) aba.getRange(2, 3, colC.length, 1).setValues(colC);
+    if (mudouZ) aba.getRange(2, 26, colZAB.length, 3).setValues(colZAB);
+  }
+
+  /* 1d. semeia a base pela planilha-mae — por padrao SO se a aba estiver vazia,
+         para nao inflar uma lista de processos curada a mao */
+  var modoMae = norm_(cfg_('INCLUIR_PLANILHA_MAE') || 'SO_SE_VAZIA');
+  var semear = modoMae.indexOf('sempre') === 0 || (modoMae.indexOf('so_se_vazia') === 0 && !ordem.length);
+  if (semear) {
+    Object.keys(meta).forEach(function (num) {
+      if (existentes[num]) return;
+      existentes[num] = { linha: 0, origem: 'Clientes e Processos' };
+      ordem.push(num);
+    });
+  }
+
+  /* 1e. grava esqueleto das linhas que ainda nao existem
          (processos que so aparecem no DJEN entram na etapa "descobrir") */
   var novos = 0;
   var linhasNovas = [];
