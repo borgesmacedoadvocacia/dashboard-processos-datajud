@@ -1,0 +1,9 @@
+*.xlsx
+*.csv
+Thumbs.db
+desktop.ini
+.DS_Store
+
+# harness de teste local (nao vai para o Pages)
+teste-local.html
+_mock.js

@@ -1,0 +1,307 @@
+/**
+ * ============================================================================
+ *  BM ADVOCACIA — Motor de sincronizacao  DataJud (CNJ) + DJEN  ->  Planilha
+ *  Planilha: "Processos [DataJud + DJEN]" - aba "Base geral"
+ * ----------------------------------------------------------------------------
+ *  O QUE FAZ
+ *   1. Monta a base de processos (planilha-mae "Clientes e Processos" +
+ *      processos descobertos no DJEN pelas OABs do escritorio).
+ *   2. Consulta a API Publica do DataJud (CNJ) em lote, por tribunal, e grava
+ *      classe, assunto, orgao julgador, grau, sistema, formato, sigilo,
+ *      data de ajuizamento e TODAS as movimentacoes.
+ *   3. Varre o DJEN (Diario de Justica Eletronico Nacional) pelas OABs do
+ *      escritorio e grava TODAS as publicacoes de cada processo.
+ *   4. Calcula colunas de gestao (fase, dias parado, situacao, ultimos eventos).
+ *
+ *  QUANDO RODA
+ *   - Todo dia as 6h (gatilho de tempo criado por configurarTudo()).
+ *   - Sempre que o botao "Atualizar" do dashboard chamar o Web App (doGet).
+ *   - Pelo menu "BM - DataJud/DJEN" dentro da propria planilha.
+ *
+ *  Execucoes longas sao retomadas automaticamente: o script salva um cursor e
+ *  cria um gatilho de continuacao antes de estourar o limite de tempo.
+ * ============================================================================
+ */
+
+/* --------------------------- CONFIGURACAO ------------------------------- */
+
+var CFG_PADRAO = {
+  ABA_BASE:            'Base geral',
+  PLANILHA_MAE_ID:     '1XKMeYEapBqBq_IIaLu2uN-ceB3btArIYmrPBuyxsLHU',
+  PLANILHA_MAE_ABA:    'Todos os Processos',
+  OABS:                '41438/BA, 63805/BA',
+  DJEN_DATA_INICIAL:   '2023-01-01',
+  DJEN_JANELA_DIAS:    '45',
+  DATAJUD_APIKEY:      'APIKey cDZHYzlZa0JadVREZDJCendQbXY6SkJlTzNjLV9TRENyQk1RdnFKZGRQdw==',
+  DESCOBRIR_NO_DJEN:   'SIM',
+  MAX_MOVIMENTOS:      '400',
+  MAX_PUBLICACOES:     '200',
+  TOKEN_WEBAPP:        'bm-datajud',
+  DIAS_ESTAGNADO:      '90'
+};
+
+var ABA_SYNC = '_Sync';
+var ABA_CFG  = '_Config';
+var ABA_DJEN = '_DJEN';
+
+var LIMITE_MS        = 4.5 * 60 * 1000;   // recomeca antes do teto de 6 min
+var LOTE_DATAJUD     = 40;                // processos por requisicao
+var PARALELO_DATAJUD = 8;                 // requisicoes simultaneas (fetchAll)
+var DJEN_ITENS_PAG   = 500;
+var DJEN_PAUSA_MS    = 3300;              // limite observado: 20 req/min
+var MAX_CHARS_CEL    = 45000;             // teto seguro por celula (limite 50k)
+
+var COLUNAS = [
+  'Tipo de Processo','Numero do Processo','Partes','Tribunal','Vara','Grau','Classe',
+  'Assunto','Orgao Julgador','Data do Ajuizamento','Sistema','Formato','Nivel de Sigilo',
+  'Movimentos','Publicacoes no DJEN',
+  /* gestao */
+  'Ultima Atualizacao','Qtd. Movimentos','Data Ultima Movimentacao','Ultima Movimentacao',
+  'Dias sem Movimentacao','Qtd. Publicacoes','Data Ultima Publicacao','Ultima Publicacao',
+  'Fase Processual','Situacao','Valor da Causa','Cliente / Parte Representada','Origem do Cadastro'
+];
+
+/* --------------------------- MENU / SETUP ------------------------------- */
+
+function onOpen() {
+  SpreadsheetApp.getUi()
+    .createMenu('BM - DataJud/DJEN')
+    .addItem('Sincronizar agora (completa)', 'sincronizarCompletaMenu')
+    .addItem('Sincronizar incremental', 'sincronizarIncrementalMenu')
+    .addSeparator()
+    .addItem('Configurar tudo (1a vez)', 'configurarTudo')
+    .addItem('Recriar gatilho das 6h', 'criarGatilhoDiario')
+    .addItem('Cancelar sincronizacao', 'cancelarSincronizacao')
+    .addToUi();
+}
+
+/** Cria abas de apoio, cabecalhos e o gatilho diario das 6h. */
+function configurarTudo() {
+  var ss = SpreadsheetApp.getActive();
+  garantirConfig_(ss);
+  garantirSync_(ss);
+  garantirDJEN_(ss);
+  garantirCabecalho_(ss);
+  criarGatilhoDiario();
+  try {
+    SpreadsheetApp.getUi().alert(
+      'Configuracao concluida.\n\n' +
+      '- Abas _Config, _Sync e _DJEN criadas.\n' +
+      '- Cabecalho da "Base geral" ajustado (28 colunas).\n' +
+      '- Gatilho diario as 6h criado.\n\n' +
+      'Agora publique o Web App (Implantar > Nova implantacao > App da Web, ' +
+      'executar como Eu, acesso Qualquer pessoa) e cole a URL no dashboard.');
+  } catch (e) {}
+}
+
+function criarGatilhoDiario() {
+  ScriptApp.getProjectTriggers().forEach(function (t) {
+    if (t.getHandlerFunction() === 'sincronizacaoDiaria') ScriptApp.deleteTrigger(t);
+  });
+  ScriptApp.newTrigger('sincronizacaoDiaria')
+    .timeBased().atHour(6).nearMinute(0).everyDays(1)
+    .inTimezone(Session.getScriptTimeZone() || 'America/Bahia').create();
+}
+
+/* ------------------------- PONTOS DE ENTRADA ---------------------------- */
+
+function sincronizacaoDiaria()       { iniciarSincronizacao_('completa', 'gatilho 6h');  executarEtapas_(); }
+function sincronizarCompletaMenu()   { iniciarSincronizacao_('completa', 'menu');        executarEtapas_(); }
+function sincronizarIncrementalMenu(){ iniciarSincronizacao_('incremental', 'menu');     executarEtapas_(); }
+function continuarSincronizacao()    { limparGatilhosContinuacao_();                     executarEtapas_(); }
+
+function cancelarSincronizacao() {
+  limparGatilhosContinuacao_();
+  props_().deleteProperty('cursor');
+  gravarSync_({ status: 'ocioso', etapa: '-', mensagem: 'Cancelado pelo usuario.' });
+}
+
+/**
+ * Web App - chamado pelo botao "Atualizar" do dashboard.
+ *   ?acao=status                -> estado atual da sincronizacao
+ *   ?acao=atualizar&token=XXXX  -> dispara sincronizacao completa
+ */
+function doGet(e) {
+  var p = (e && e.parameter) || {};
+  var acao = p.acao || 'status';
+  var saida;
+  try {
+    if (acao === 'atualizar') {
+      if (String(p.token || '') !== String(cfg_('TOKEN_WEBAPP'))) {
+        saida = { ok: false, erro: 'Token invalido.' };
+      } else {
+        var st = lerSync_();
+        if (st.status === 'rodando') {
+          saida = { ok: true, jaRodando: true, sync: st };
+        } else {
+          iniciarSincronizacao_(p.modo === 'incremental' ? 'incremental' : 'completa', 'dashboard');
+          limparGatilhosContinuacao_();
+          ScriptApp.newTrigger('continuarSincronizacao').timeBased().after(5 * 1000).create();
+          saida = { ok: true, iniciada: true, sync: lerSync_() };
+        }
+      }
+    } else {
+      saida = { ok: true, sync: lerSync_() };
+    }
+  } catch (err) {
+    saida = { ok: false, erro: String((err && err.message) || err) };
+  }
+  return ContentService.createTextOutput(JSON.stringify(saida))
+    .setMimeType(ContentService.MimeType.JSON);
+}
+
+/* --------------------------- ORQUESTRACAO ------------------------------- */
+
+function iniciarSincronizacao_(modo, origem) {
+  var ss = SpreadsheetApp.getActive();
+  garantirConfig_(ss); garantirSync_(ss); garantirDJEN_(ss); garantirCabecalho_(ss);
+  props_().setProperty('cursor', JSON.stringify({ etapa: 'base', modo: modo, i: 0 }));
+  gravarSync_({
+    status: 'rodando', etapa: 'base', inicio: new Date(), fim: '',
+    progresso: 0, mensagem: 'Iniciada (' + modo + ') via ' + origem + '.',
+    novos: 0, movimentos: 0, publicacoes: 0
+  });
+}
+
+function executarEtapas_() {
+  var lock = LockService.getScriptLock();
+  if (!lock.tryLock(5000)) return;              // ja ha execucao em curso
+  var t0 = Date.now();
+  try {
+    var cur = JSON.parse(props_().getProperty('cursor') || 'null');
+    if (!cur) { lock.releaseLock(); return; }
+
+    while (true) {
+      if (Date.now() - t0 > LIMITE_MS) { agendarContinuacao_(); break; }
+
+      if (cur.etapa === 'base')            cur = etapaBase_(cur);
+      else if (cur.etapa === 'datajud')    cur = etapaDataJud_(cur, t0);
+      else if (cur.etapa === 'djen')       cur = etapaDJEN_(cur, t0);
+      else if (cur.etapa === 'descobrir')  cur = etapaDescobrir_(cur);
+      else if (cur.etapa === 'consolidar') cur = etapaConsolidar_(cur);
+      else { finalizar_(); break; }
+
+      props_().setProperty('cursor', JSON.stringify(cur));
+      if (cur.etapa === 'fim') { finalizar_(); break; }
+    }
+  } catch (err) {
+    gravarSync_({ status: 'erro', mensagem: 'Erro: ' + ((err && err.message) || err) });
+    try { console.error(err); } catch (e) {}
+  } finally {
+    try { lock.releaseLock(); } catch (e) {}
+  }
+}
+
+function agendarContinuacao_() {
+  limparGatilhosContinuacao_();
+  ScriptApp.newTrigger('continuarSincronizacao').timeBased().after(30 * 1000).create();
+  gravarSync_({ mensagem: 'Pausa tecnica - retomando em ~30s.' });
+}
+
+function limparGatilhosContinuacao_() {
+  ScriptApp.getProjectTriggers().forEach(function (t) {
+    if (t.getHandlerFunction() === 'continuarSincronizacao') ScriptApp.deleteTrigger(t);
+  });
+}
+
+function finalizar_() {
+  limparGatilhosContinuacao_();
+  props_().deleteProperty('cursor');
+  gravarSync_({
+    status: 'ocioso', etapa: 'concluida', fim: new Date(), progresso: 100,
+    mensagem: 'Sincronizacao concluida.', ultimaOk: new Date()
+  });
+}
+
+/* --------------------------- ETAPA 1 - BASE ----------------------------- */
+
+function etapaBase_(cur) {
+  gravarSync_({ etapa: 'base', progresso: 3, mensagem: 'Montando a base de processos...' });
+  var ss = SpreadsheetApp.getActive();
+  var aba = ss.getSheetByName(cfg_('ABA_BASE'));
+
+  /* 1a. processos ja na planilha */
+  var existentes = {};
+  var ordem = [];
+  var ult = aba.getLastRow();
+  if (ult > 1) {
+    var vals = aba.getRange(2, 1, ult - 1, 28).getValues();
+    for (var i = 0; i < vals.length; i++) {
+      var n = soDigitos_(vals[i][1]);
+      if (n.length !== 20 || existentes[n]) continue;
+      existentes[n] = { linha: i + 2, origem: vals[i][27] };
+      ordem.push(n);
+    }
+  }
+
+  /* 1b. planilha-mae "Clientes e Processos" */
+  var meta = {};
+  try {
+    var mae = SpreadsheetApp.openById(cfg_('PLANILHA_MAE_ID'))
+                            .getSheetByName(cfg_('PLANILHA_MAE_ABA'));
+    if (mae) {
+      var mv = mae.getDataRange().getDisplayValues();
+      var hh = mv[0].map(function (c) { return chave_(c); });
+      var ix = function (nome) { return hh.indexOf(chave_(nome)); };
+      var cNum  = ix('Nº DO PROCESSO');
+      if (cNum < 0) cNum = acharColunaNumero_(hh);
+      var cTipo = ix('TIPO DE PROCESSO'), cAut = ix('AUTOR'), cReu = ix('RÉU'),
+          cVal  = ix('VALOR DA CAUSA'),   cPar = ix('PARTE REPRESENTADA');
+      for (var r = 1; r < mv.length; r++) {
+        var num = soDigitos_(mv[r][cNum]);
+        if (num.length !== 20 || meta[num]) continue;
+        var autor = cAut >= 0 ? String(mv[r][cAut] || '').trim() : '';
+        var reu   = cReu >= 0 ? String(mv[r][cReu] || '').trim() : '';
+        meta[num] = {
+          tipo:    cTipo >= 0 ? String(mv[r][cTipo] || '').trim() : '',
+          partes:  (autor && reu) ? (autor + ' x ' + reu) : (autor || reu),
+          valor:   cVal >= 0 ? mv[r][cVal] : '',
+          cliente: cPar >= 0 ? String(mv[r][cPar] || '').trim() : ''
+        };
+        if (!existentes[num]) {
+          existentes[num] = { linha: 0, origem: 'Clientes e Processos' };
+          ordem.push(num);
+        }
+      }
+    }
+  } catch (e) {
+    gravarSync_({ mensagem: 'Aviso: planilha-mae nao pode ser lida (' + e.message + '). Seguindo com a base atual.' });
+  }
+
+  /* 1c. grava esqueleto das linhas que ainda nao existem
+         (processos que so aparecem no DJEN entram na etapa "descobrir") */
+  var novos = 0;
+  var linhasNovas = [];
+  ordem.forEach(function (n) {
+    if (existentes[n].linha) return;
+    var m = meta[n] || {};
+    var linha = [];
+    for (var c = 0; c < 28; c++) linha.push('');
+    linha[0]  = m.tipo || '';
+    linha[1]  = formatarCNJ_(n);
+    linha[2]  = m.partes || existentes[n].partes || '';
+    linha[25] = m.valor || '';
+    linha[26] = m.cliente || '';
+    linha[27] = existentes[n].origem || 'Clientes e Processos';
+    linhasNovas.push(linha);
+  });
+  if (linhasNovas.length) {
+    var inicio = Math.max(aba.getLastRow(), 1) + 1;
+    if (aba.getMaxRows() < inicio + linhasNovas.length) {
+      aba.insertRowsAfter(aba.getMaxRows(), inicio + linhasNovas.length - aba.getMaxRows());
+    }
+    for (var off = 0; off < linhasNovas.length; off += 500) {
+      var bloco = linhasNovas.slice(off, off + 500);
+      aba.getRange(inicio + off, 1, bloco.length, 28).setValues(bloco);
+    }
+  }
+
+  gravarSync_({ progresso: 10, processos: ordem.length, novos: novos,
+    mensagem: 'Base montada: ' + ordem.length + ' processos (' + novos + ' novos).' });
+  return { etapa: 'datajud', modo: cur.modo, i: 0, novos: novos };
+}
+
+function acharColunaNumero_(hh) {
+  for (var i = 0; i < hh.length; i++) if (/processo/.test(hh[i]) && /^n/.test(hh[i])) return i;
+  return 1;
+}

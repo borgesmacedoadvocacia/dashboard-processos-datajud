@@ -1,0 +1,950 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8" />
+<script>
+/* Central BM — o acesso a este dashboard é pela central única.
+   Link antigo/acesso direto é remanejado para a central; dentro dela,
+   com a sessão ativa, a página abre normalmente. */
+(function () {
+  var PORTAL = 'https://borgesmacedoadvocacia.github.io/';
+  if (location.protocol === 'file:' || location.hostname === 'localhost' || location.hostname === '127.0.0.1') return;
+  function ir() { try { window.top.location.replace(PORTAL); } catch (e) { location.replace(PORTAL); } }
+  if (window.self === window.top) { ir(); return; }
+  var ok = false;
+  try { ok = sessionStorage.getItem('bm_portal_auth') === '1'; } catch (e) {}
+  if (!ok) { ir(); return; }
+  document.documentElement.setAttribute('data-portal', '1');
+})();
+</script>
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Processos [DataJud] · BM Advocacia</title>
+<link rel="icon" type="image/png" href="favicon.png" />
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
+<style>
+  :root{
+    --primary:#C4A028; --primary-mid:#E8C96A; --primary-light:rgba(196,160,40,.18); --primary-pale:rgba(196,160,40,.09);
+    --green:#43a047; --green-light:rgba(67,160,71,.18);
+    --danger:#ef5350; --danger-light:rgba(229,57,53,.18);
+    --warning:#ff8f00; --warning-light:rgba(255,143,0,.18);
+    --info:#42a5f5; --info-light:rgba(66,165,245,.18);
+    --neutral:#6b82a8; --neutral-light:rgba(107,130,168,.18);
+    --text-main:#eaeffa; --text-sub:#6b82a8; --text-muted:#3d5275;
+    --border:#1a2f54; --bg:#060e1f; --card:#0c1a35; --card2:#07112a;
+    --shadow-md:0 4px 16px rgba(0,0,0,.45);
+  }
+  *,*::before,*::after{box-sizing:border-box;margin:0;padding:0;}
+  body{font-family:'Inter',system-ui,sans-serif;background:var(--bg);color:var(--text-main);
+       font-size:14px;line-height:1.5;-webkit-font-smoothing:antialiased;}
+  .wrap{max-width:1680px;margin:0 auto;padding:20px 22px 60px;}
+  a{color:var(--primary-mid);text-decoration:none;}
+  .mono{font-variant-numeric:tabular-nums;font-feature-settings:"tnum";}
+
+  /* ---------- topo ---------- */
+  header{display:flex;align-items:center;gap:16px;flex-wrap:wrap;
+         padding:14px 18px;background:linear-gradient(135deg,var(--card),var(--card2));
+         border:1px solid var(--border);border-radius:14px;box-shadow:var(--shadow-md);margin-bottom:18px;}
+  header img{height:40px;width:auto;}
+  .htitle h1{font-size:18px;font-weight:700;letter-spacing:-.3px;}
+  .htitle p{font-size:12px;color:var(--text-sub);}
+  .hspace{flex:1;}
+  .btn{border:1px solid var(--border);background:var(--card2);color:var(--text-main);
+       padding:9px 15px;border-radius:9px;font-size:13px;font-weight:600;cursor:pointer;
+       font-family:inherit;transition:.15s;display:inline-flex;align-items:center;gap:7px;}
+  .btn:hover{border-color:var(--primary);color:var(--primary-mid);}
+  .btn.pri{background:linear-gradient(135deg,var(--primary),#a8871f);border-color:transparent;color:#0b1226;}
+  .btn.pri:hover{filter:brightness(1.1);color:#0b1226;}
+  .btn:disabled{opacity:.5;cursor:not-allowed;}
+  .sync{font-size:11.5px;color:var(--text-sub);text-align:right;line-height:1.35;max-width:340px;}
+  .sync b{color:var(--primary-mid);}
+  .bar{height:4px;background:var(--border);border-radius:3px;overflow:hidden;margin-top:5px;}
+  .bar i{display:block;height:100%;background:linear-gradient(90deg,var(--primary),var(--primary-mid));transition:width .4s;}
+
+  /* ---------- avisos ---------- */
+  .aviso{border:1px solid var(--warning);background:var(--warning-light);border-radius:12px;
+         padding:14px 16px;margin-bottom:16px;font-size:13px;}
+  .aviso h3{font-size:13.5px;margin-bottom:6px;color:#ffc046;}
+  .aviso ol{margin:8px 0 0 18px;} .aviso li{margin-bottom:4px;}
+  .aviso code{background:rgba(0,0,0,.35);padding:1px 6px;border-radius:4px;font-size:12px;}
+
+  /* ---------- KPIs ---------- */
+  .kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(168px,1fr));gap:12px;margin-bottom:16px;}
+  .kpi{background:linear-gradient(135deg,var(--card),var(--card2));border:1px solid var(--border);
+       border-radius:12px;padding:13px 15px;position:relative;overflow:hidden;cursor:pointer;transition:.15s;}
+  .kpi:hover{border-color:var(--primary);transform:translateY(-1px);}
+  .kpi.static{cursor:default;} .kpi.static:hover{transform:none;border-color:var(--border);}
+  .kpi::before{content:'';position:absolute;left:0;top:0;bottom:0;width:3px;background:var(--accent,var(--primary));}
+  .kpi .lbl{font-size:10.5px;text-transform:uppercase;letter-spacing:.7px;color:var(--text-sub);font-weight:600;}
+  .kpi .val{font-size:25px;font-weight:800;letter-spacing:-1px;margin-top:3px;color:var(--accent,var(--text-main));}
+  .kpi .sub{font-size:11px;color:var(--text-muted);margin-top:1px;}
+
+  /* ---------- grid ---------- */
+  .grid{display:grid;gap:14px;margin-bottom:16px;}
+  .g2{grid-template-columns:repeat(auto-fit,minmax(380px,1fr));}
+  .g3{grid-template-columns:repeat(auto-fit,minmax(300px,1fr));}
+  .card{background:linear-gradient(135deg,var(--card),var(--card2));border:1px solid var(--border);
+        border-radius:13px;padding:15px 17px;}
+  .card h2{font-size:13px;font-weight:700;letter-spacing:.2px;margin-bottom:12px;
+           display:flex;align-items:center;gap:8px;}
+  .card h2 span{font-size:11px;color:var(--text-sub);font-weight:500;}
+  .chartbox{position:relative;height:250px;}
+
+  /* ---------- alertas de gestão ---------- */
+  .alertas{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:10px;}
+  .al{border:1px solid var(--border);border-radius:10px;padding:11px 13px;background:var(--card2);
+      cursor:pointer;transition:.15s;border-left:3px solid var(--c,var(--neutral));}
+  .al:hover{border-color:var(--c,var(--primary));}
+  .al .n{font-size:20px;font-weight:800;color:var(--c,var(--text-main));}
+  .al .t{font-size:11.5px;color:var(--text-sub);line-height:1.35;margin-top:1px;}
+
+  /* ---------- filtros ---------- */
+  .filtros{display:flex;flex-wrap:wrap;gap:9px;align-items:center;margin-bottom:12px;}
+  input[type=text],select,textarea{background:var(--card2);border:1px solid var(--border);color:var(--text-main);
+        padding:8px 11px;border-radius:8px;font-size:12.5px;font-family:inherit;outline:none;}
+  input[type=text]:focus,select:focus,textarea:focus{border-color:var(--primary);}
+  input[type=text]{min-width:230px;}
+  .chip{padding:4px 10px;border-radius:20px;font-size:11px;font-weight:600;display:inline-block;white-space:nowrap;}
+
+  /* ---------- tabela ---------- */
+  .tabwrap{overflow:auto;max-height:640px;border:1px solid var(--border);border-radius:11px;}
+  table{width:100%;border-collapse:collapse;font-size:12.3px;}
+  thead th{position:sticky;top:0;background:#0a1730;z-index:2;text-align:left;padding:9px 10px;
+           font-size:10.5px;text-transform:uppercase;letter-spacing:.6px;color:var(--text-sub);
+           border-bottom:1px solid var(--border);cursor:pointer;white-space:nowrap;}
+  thead th:hover{color:var(--primary-mid);}
+  tbody td{padding:8px 10px;border-bottom:1px solid rgba(26,47,84,.5);vertical-align:top;}
+  tbody tr{cursor:pointer;}
+  tbody tr:hover{background:var(--primary-pale);}
+  .trunc{max-width:270px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;display:block;}
+
+  /* ---------- drawer ---------- */
+  .ov{position:fixed;inset:0;background:rgba(3,8,18,.72);backdrop-filter:blur(3px);z-index:60;display:none;}
+  .ov.on{display:block;}
+  .drawer{position:fixed;top:0;right:0;bottom:0;width:min(760px,96vw);background:var(--bg);
+          border-left:1px solid var(--border);z-index:61;transform:translateX(102%);transition:transform .25s;
+          display:flex;flex-direction:column;}
+  .drawer.on{transform:none;}
+  .dhead{padding:16px 20px;border-bottom:1px solid var(--border);background:var(--card);}
+  .dbody{overflow:auto;padding:16px 20px 40px;flex:1;}
+  .dl{display:grid;grid-template-columns:150px 1fr;gap:5px 12px;font-size:12.5px;margin-bottom:16px;}
+  .dl dt{color:var(--text-sub);} .dl dd{color:var(--text-main);}
+  .tl{border-left:2px solid var(--border);margin-left:6px;padding-left:14px;}
+  .tl .it{position:relative;padding:9px 0;border-bottom:1px solid rgba(26,47,84,.45);font-size:12.3px;}
+  .tl .it::before{content:'';position:absolute;left:-19px;top:14px;width:7px;height:7px;border-radius:50%;
+                  background:var(--primary);border:2px solid var(--bg);}
+  .tl .d{color:var(--primary-mid);font-weight:600;font-size:11.5px;}
+  .tl .txt{white-space:pre-wrap;color:var(--text-sub);margin-top:3px;line-height:1.45;}
+  .tabs{display:flex;gap:6px;margin:6px 0 14px;}
+  .tab{padding:6px 13px;border-radius:8px;font-size:12px;font-weight:600;cursor:pointer;
+       border:1px solid var(--border);background:var(--card2);color:var(--text-sub);}
+  .tab.on{background:var(--primary-light);border-color:var(--primary);color:var(--primary-mid);}
+
+  /* ---------- consultor IA ---------- */
+  .ia{display:flex;flex-direction:column;gap:10px;}
+  .iabox{background:var(--card2);border:1px solid var(--border);border-radius:11px;padding:14px;
+         max-height:420px;overflow:auto;font-size:13px;line-height:1.6;}
+  .msg{margin-bottom:14px;} .msg:last-child{margin-bottom:0;}
+  .msg .who{font-size:10.5px;text-transform:uppercase;letter-spacing:.7px;font-weight:700;margin-bottom:4px;}
+  .msg.u .who{color:var(--info);} .msg.a .who{color:var(--primary-mid);}
+  .msg .body{white-space:pre-wrap;}
+  .msg .tool{font-size:11px;color:var(--text-muted);font-style:italic;margin-top:4px;}
+  .iarow{display:flex;gap:8px;} .iarow textarea{flex:1;resize:vertical;min-height:46px;}
+  .sug{display:flex;flex-wrap:wrap;gap:6px;}
+  .sug button{font-size:11.5px;padding:5px 11px;border-radius:16px;border:1px solid var(--border);
+              background:var(--card2);color:var(--text-sub);cursor:pointer;font-family:inherit;}
+  .sug button:hover{border-color:var(--primary);color:var(--primary-mid);}
+  .keybar{border:1px dashed var(--border);border-radius:10px;padding:11px 13px;font-size:12px;
+          color:var(--text-sub);display:flex;gap:9px;align-items:center;flex-wrap:wrap;}
+  footer{text-align:center;color:var(--text-muted);font-size:11px;margin-top:26px;}
+  .hide{display:none !important;}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header>
+    <img src="logo.png" alt="BM Advocacia" onerror="this.style.display='none'">
+    <div class="htitle">
+      <h1>Processos Judiciais · DataJud + DJEN</h1>
+      <p>Base sincronizada com a API Pública do CNJ e o Diário de Justiça Eletrônico Nacional</p>
+    </div>
+    <div class="hspace"></div>
+    <div class="sync" id="syncInfo">Carregando…</div>
+    <button class="btn" id="btnCfg" title="Configurações">⚙</button>
+    <button class="btn pri" id="btnAtualizar">↻ Atualizar</button>
+  </header>
+
+  <div id="avisoSetup" class="aviso hide"></div>
+
+  <div class="kpis" id="kpis"></div>
+
+  <div class="card" style="margin-bottom:16px">
+    <h2>Alertas de gestão <span>clique para filtrar a tabela</span></h2>
+    <div class="alertas" id="alertas"></div>
+  </div>
+
+  <div class="grid g2">
+    <div class="card"><h2>Carteira por tipo de processo</h2><div class="chartbox"><canvas id="cTipo"></canvas></div></div>
+    <div class="card"><h2>Fase processual</h2><div class="chartbox"><canvas id="cFase"></canvas></div></div>
+  </div>
+
+  <div class="grid g2">
+    <div class="card"><h2>Concentração por tribunal <span>top 12</span></h2><div class="chartbox"><canvas id="cTrib"></canvas></div></div>
+    <div class="card"><h2>Publicações no DJEN por mês <span>últimos 18 meses</span></h2><div class="chartbox"><canvas id="cPub"></canvas></div></div>
+  </div>
+
+  <div class="grid g2">
+    <div class="card"><h2>Ajuizamentos por ano</h2><div class="chartbox"><canvas id="cAno"></canvas></div></div>
+    <div class="card"><h2>Idade da carteira <span>dias sem movimentação</span></h2><div class="chartbox"><canvas id="cIdade"></canvas></div></div>
+  </div>
+
+  <div class="card" style="margin-bottom:16px">
+    <h2>Consultor I.A. <span>responde com base nos dados da planilha · Claude Sonnet 5</span></h2>
+    <div class="ia">
+      <div id="keybar" class="keybar hide">
+        <span>Cole sua <b>chave da API do Claude</b> para ativar o consultor (fica só neste navegador).</span>
+        <input type="text" id="apiKey" placeholder="sk-ant-…" style="flex:1;min-width:250px">
+        <button class="btn" id="btnKey">Salvar</button>
+      </div>
+      <div class="iabox" id="iaBox">
+        <div class="msg a"><div class="who">Consultor</div><div class="body">Pergunte o que quiser sobre a carteira. Eu consulto a planilha e respondo com números conferidos — nunca estimados.</div></div>
+      </div>
+      <div class="sug" id="sugestoes"></div>
+      <div class="iarow">
+        <textarea id="iaInput" placeholder="Ex.: quais processos estão parados há mais de 180 dias no TJBA?"></textarea>
+        <button class="btn pri" id="btnPerg">Perguntar</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>Carteira de processos <span id="tabInfo"></span></h2>
+    <div class="filtros">
+      <input type="text" id="fBusca" placeholder="Buscar nº, parte, cliente, assunto, vara…">
+      <select id="fTipo"></select>
+      <select id="fFase"></select>
+      <select id="fSituacao"></select>
+      <select id="fTribunal"></select>
+      <select id="fGrau"></select>
+      <button class="btn" id="btnLimpar">Limpar filtros</button>
+      <button class="btn" id="btnCSV">Exportar CSV</button>
+    </div>
+    <div class="tabwrap">
+      <table><thead id="thead"></thead><tbody id="tbody"></tbody></table>
+    </div>
+  </div>
+
+  <footer>
+    Borges Macedo Advocacia e Consultoria · dados públicos do DataJud (CNJ) e do DJEN (PJe/CNJ) ·
+    <span id="fonteInfo"></span>
+  </footer>
+</div>
+
+<div class="ov" id="ov"></div>
+<div class="drawer" id="drawer">
+  <div class="dhead">
+    <div style="display:flex;align-items:center;gap:12px">
+      <div style="flex:1">
+        <div style="font-size:11px;color:var(--text-sub);text-transform:uppercase;letter-spacing:.7px">Processo</div>
+        <div id="dTitulo" class="mono" style="font-size:17px;font-weight:700"></div>
+      </div>
+      <button class="btn" id="btnFechar">✕</button>
+    </div>
+  </div>
+  <div class="dbody" id="dBody"></div>
+</div>
+
+<script>
+/* =====================================================================
+   CONFIGURAÇÃO
+   ===================================================================== */
+const SHEET_ID   = '1MXpGlo3U1bDV34l_jj98ZNPwgguvD-hCFOCaARNQaYs';
+const ABA        = 'Base geral';
+const ABA_SYNC   = '_Sync';
+const API_KEY    = 'AIzaSyDPMGdaY0Yxm4EFrGFoaamJeWBtfDAJZfw';   // mesma chave dos demais painéis BM
+const CHAT_MODEL = 'claude-sonnet-5';                            // travado no Sonnet 5
+const LS_KEY     = 'bm_claude_key';
+const LS_WEBAPP  = 'bm_datajud_webapp';
+const LS_TOKEN   = 'bm_datajud_token';
+const REFRESH_MS = 5 * 60 * 1000;
+
+/* Colunas gravadas pelo Apps Script (A..AB) */
+const COL = { tipo:0,num:1,partes:2,tribunal:3,vara:4,grau:5,classe:6,assunto:7,orgao:8,
+              ajuizamento:9,sistema:10,formato:11,sigilo:12,
+              /* N e O ficam de fora do carregamento (texto pesado, lido sob demanda) */
+              atualizado:0,qtdMov:1,dtMov:2,ultMov:3,diasSemMov:4,qtdPub:5,dtPub:6,ultPub:7,
+              fase:8,situacao:9,valor:10,cliente:11,origem:12 };
+
+let ROWS = [], FILTRO = {}, CHARTS = {}, ORDEM = { campo:'diasSemMov', asc:false }, SYNC = null, TIMER=null;
+
+/* =====================================================================
+   UTILITÁRIOS
+   ===================================================================== */
+const $  = s => document.querySelector(s);
+const $$ = s => Array.from(document.querySelectorAll(s));
+const nrm = s => String(s==null?'':s).normalize('NFD').replace(/[̀-ͯ]/g,'').toLowerCase().trim();
+const num = v => { const n = Number(String(v==null?'':v).replace(/[^\d,.-]/g,'').replace(/\.(?=\d{3}\b)/g,'').replace(',','.')); return isFinite(n)?n:0; };
+const fmtN = n => (n||0).toLocaleString('pt-BR');
+const fmtM = n => (n||0).toLocaleString('pt-BR',{style:'currency',currency:'BRL',maximumFractionDigits:0});
+const esc = s => String(s==null?'':s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const dBR = s => { const m=String(s||'').match(/^(\d{2})\/(\d{2})\/(\d{4})/); return m?new Date(+m[3],+m[2]-1,+m[1]):null; };
+
+function anoDe(r){ const d=dBR(r.ajuizamento); return d?d.getFullYear():null; }
+
+/* =====================================================================
+   CARREGAMENTO
+   ===================================================================== */
+async function sheets(ranges){
+  const q = ranges.map(r=>'ranges='+encodeURIComponent(r)).join('&');
+  const url = 'https://sheets.googleapis.com/v4/spreadsheets/'+SHEET_ID+'/values:batchGet?'+q+
+              '&valueRenderOption=UNFORMATTED_VALUE&dateTimeRenderOption=FORMATTED_STRING&key='+API_KEY;
+  const res = await fetch(url);
+  if(!res.ok){ const t=await res.text(); throw new Error('Sheets API '+res.status+': '+t.slice(0,180)); }
+  return (await res.json()).valueRanges || [];
+}
+
+async function carregar(){
+  let vr;
+  try{
+    vr = await sheets(["'"+ABA+"'!A2:M", "'"+ABA+"'!P2:AB", "'"+ABA_SYNC+"'!A1:B11"]);
+  }catch(e){
+    /* a aba _Sync só existe depois que o Apps Script é instalado */
+    try{
+      vr = await sheets(["'"+ABA+"'!A2:M", "'"+ABA+"'!P2:AB"]);
+      vr.push({values:[]});
+    }catch(e2){
+      $('#syncInfo').innerHTML = '<b style="color:var(--danger)">Erro ao ler a planilha</b><br>'+esc(e2.message.slice(0,90));
+      ROWS = []; render(); return;
+    }
+  }
+  const A = vr[0].values||[], B = vr[1].values||[], S = vr[2].values||[];
+
+  SYNC = {}; S.forEach(l=>{ if(l && l[0]) SYNC[String(l[0])] = l[1]; });
+
+  ROWS = [];
+  for(let i=0;i<A.length;i++){
+    const a = A[i]||[], b = B[i]||[];
+    const numero = String(a[COL.num]||'').trim();
+    if(!numero) continue;
+    ROWS.push({
+      linha: i+2,
+      tipo: String(a[COL.tipo]||'').trim() || '—',
+      num: numero,
+      partes: String(a[COL.partes]||'').trim(),
+      tribunal: String(a[COL.tribunal]||'').trim() || '—',
+      vara: String(a[COL.vara]||'').trim(),
+      grau: String(a[COL.grau]||'').trim() || '—',
+      classe: String(a[COL.classe]||'').trim(),
+      assunto: String(a[COL.assunto]||'').trim(),
+      orgao: String(a[COL.orgao]||'').trim(),
+      ajuizamento: String(a[COL.ajuizamento]||'').trim(),
+      sistema: String(a[COL.sistema]||'').trim(),
+      formato: String(a[COL.formato]||'').trim(),
+      sigilo: Number(a[COL.sigilo]||0),
+      atualizado: String(b[COL.atualizado]||'').trim(),
+      qtdMov: Number(b[COL.qtdMov]||0),
+      dtMov: String(b[COL.dtMov]||'').trim(),
+      ultMov: String(b[COL.ultMov]||'').trim(),
+      dias: b[COL.diasSemMov]===''||b[COL.diasSemMov]==null ? null : Number(b[COL.diasSemMov]),
+      qtdPub: Number(b[COL.qtdPub]||0),
+      dtPub: String(b[COL.dtPub]||'').trim(),
+      ultPub: String(b[COL.ultPub]||'').trim(),
+      fase: String(b[COL.fase]||'').trim() || '—',
+      situacao: String(b[COL.situacao]||'').trim() || 'Sem dados nas fontes',
+      valor: num(b[COL.valor]),
+      cliente: String(b[COL.cliente]||'').trim(),
+      origem: String(b[COL.origem]||'').trim()
+    });
+  }
+  render();
+}
+
+/* =====================================================================
+   SINCRONIZAÇÃO (Web App do Apps Script)
+   ===================================================================== */
+const webapp = () => (localStorage.getItem(LS_WEBAPP)||'').trim();
+const token  = () => (localStorage.getItem(LS_TOKEN)||'bm-datajud').trim();
+
+function pintarSync(){
+  const el = $('#syncInfo');
+  if(!SYNC){ el.textContent='—'; return; }
+  const st = String(SYNC.status||'ocioso');
+  const prog = Number(SYNC.progresso||0);
+  const rod = st==='rodando';
+  el.innerHTML =
+    (rod ? '<b>Sincronizando…</b> '+prog+'%' : (SYNC.ultimaOk ? 'Última sincronização: <b>'+esc(String(SYNC.ultimaOk))+'</b>' : '<b>Nunca sincronizado</b>')) +
+    '<br>' + esc(String(SYNC.mensagem||'').slice(0,110)) +
+    (rod ? '<div class="bar"><i style="width:'+prog+'%"></i></div>' : '');
+  $('#btnAtualizar').disabled = rod;
+  $('#btnAtualizar').textContent = rod ? '⏳ Rodando…' : '↻ Atualizar';
+  if(rod && !TIMER){ TIMER = setInterval(async()=>{ await carregar(); if(String((SYNC||{}).status)!=='rodando'){ clearInterval(TIMER); TIMER=null; } }, 12000); }
+}
+
+async function atualizar(){
+  const url = webapp();
+  if(!url){ abrirConfig('Cole a URL do Web App do Apps Script para habilitar o botão Atualizar.'); return; }
+  $('#btnAtualizar').disabled = true; $('#btnAtualizar').textContent='⏳ Disparando…';
+  try{
+    const r = await fetch(url+(url.indexOf('?')<0?'?':'&')+'acao=atualizar&token='+encodeURIComponent(token()));
+    const j = await r.json();
+    if(!j.ok) throw new Error(j.erro||'falha ao iniciar');
+  }catch(e){
+    /* o Apps Script às vezes bloqueia a leitura da resposta por CORS; o disparo em si funciona */
+    try{ await fetch(url+(url.indexOf('?')<0?'?':'&')+'acao=atualizar&token='+encodeURIComponent(token()),{mode:'no-cors'}); }catch(e2){}
+  }
+  setTimeout(carregar, 4000);
+}
+
+function abrirConfig(msg){
+  const u = prompt((msg? msg+'\n\n':'')+'URL do Web App do Apps Script (…/exec):', webapp());
+  if(u!==null) localStorage.setItem(LS_WEBAPP, u.trim());
+  const t = prompt('Token do Web App (campo TOKEN_WEBAPP da aba _Config):', token());
+  if(t!==null) localStorage.setItem(LS_TOKEN, t.trim());
+  render();
+}
+
+/* =====================================================================
+   RENDER
+   ===================================================================== */
+function render(){
+  pintarSync();
+  avisoSetup();
+  if(!ROWS.length){ $('#kpis').innerHTML=''; $('#alertas').innerHTML=''; $('#tbody').innerHTML=''; $('#tabInfo').textContent=''; return; }
+  montarFiltros();
+  kpis();
+  alertas();
+  graficos();
+  tabela();
+  $('#fonteInfo').textContent = 'planilha "Processos [DataJud + DJEN]" · '+fmtN(ROWS.length)+' processos';
+}
+
+function avisoSetup(){
+  const el = $('#avisoSetup');
+  const semDados = !ROWS.length;
+  const semWebapp = !webapp();
+  if(!semDados && !semWebapp){ el.classList.add('hide'); return; }
+  el.classList.remove('hide');
+  el.innerHTML =
+    '<h3>'+(semDados?'A planilha ainda está vazia':'Botão “Atualizar” não configurado')+'</h3>'+
+    (semDados
+      ? '<div>Instale o motor de sincronização na planilha para que ela seja alimentada pelo DataJud e pelo DJEN:</div>'+
+        '<ol><li>Abra a planilha › <b>Extensões › Apps Script</b>.</li>'+
+        '<li>Cole <code>Codigo.gs</code> e <code>Fontes.gs</code> (pasta <code>apps-script</code>) em dois arquivos.</li>'+
+        '<li>Rode <code>configurarTudo</code> uma vez e autorize.</li>'+
+        '<li>Menu <b>BM · DataJud/DJEN › Sincronizar agora</b>.</li>'+
+        '<li><b>Implantar › Nova implantação › App da Web</b> (executar como <i>Eu</i>, acesso <i>Qualquer pessoa</i>) e cole a URL no ⚙ aqui.</li></ol>'
+      : '<div>Clique em ⚙ e cole a URL do Web App (…/exec) para que o botão Atualizar dispare a busca completa.</div>');
+}
+
+function kpis(){
+  const R = ROWS;
+  const ativos     = R.filter(r=>r.situacao==='Ativo').length;
+  const estag      = R.filter(r=>r.situacao==='Estagnado').length;
+  const arq        = R.filter(r=>/arquiv/i.test(r.situacao)).length;
+  const semDados   = R.filter(r=>/sem dados/i.test(r.situacao)).length;
+  const hoje       = new Date();
+  const pub30      = R.filter(r=>{const d=dBR(r.dtPub);return d&&(hoje-d)/864e5<=30;}).length;
+  const valores    = R.map(r=>r.valor).filter(v=>v>0).sort((a,b)=>a-b);
+  const mediana    = valores.length? valores[Math.floor(valores.length/2)] : 0;
+  const totalMov   = R.reduce((s,r)=>s+r.qtdMov,0);
+  const totalPub   = R.reduce((s,r)=>s+r.qtdPub,0);
+  const novos12m   = R.filter(r=>{const d=dBR(r.ajuizamento);return d&&(hoje-d)/864e5<=365;}).length;
+
+  const K = [
+    ['Processos na base', fmtN(R.length), semDados?fmtN(semDados)+' sem retorno das fontes':'todos com dados', 'var(--primary)', {}],
+    ['Ativos', fmtN(ativos), pct(ativos,R.length), 'var(--green)', {situacao:'Ativo'}],
+    ['Estagnados', fmtN(estag), 'sem movimento > 90 dias', 'var(--danger)', {situacao:'Estagnado'}],
+    ['Arquivados / baixados', fmtN(arq), pct(arq,R.length), 'var(--neutral)', {situacao:'Arquivado / baixado'}],
+    ['Publicações em 30 dias', fmtN(pub30), 'processos com prazo em curso', 'var(--warning)', {pub30:true}],
+    ['Ajuizados em 12 meses', fmtN(novos12m), 'entrada da carteira', 'var(--info)', {novos12m:true}],
+    ['Valor da causa (mediana)', fmtM(mediana), fmtN(valores.length)+' com valor informado', 'var(--primary-mid)', {}],
+    ['Movimentos · Publicações', fmtN(totalMov)+' · '+fmtN(totalPub), 'registros capturados', 'var(--text-sub)', {}]
+  ];
+  $('#kpis').innerHTML = K.map((k,i)=>
+    '<div class="kpi'+(Object.keys(k[4]).length?'':' static')+'" style="--accent:'+k[3]+'" data-k="'+i+'">'+
+    '<div class="lbl">'+k[0]+'</div><div class="val mono">'+k[1]+'</div><div class="sub">'+k[2]+'</div></div>').join('');
+  $$('#kpis .kpi').forEach(el=>el.onclick=()=>{ const f=K[+el.dataset.k][4]; if(Object.keys(f).length){ FILTRO=Object.assign({},f); sincronizarSelects(); tabela(); $('.tabwrap').scrollIntoView({behavior:'smooth'}); } });
+}
+const pct = (a,b) => b? (100*a/b).toFixed(1).replace('.',',')+'% da carteira' : '—';
+
+function alertas(){
+  const hoje = new Date();
+  const A = [
+    ['pub7',   ROWS.filter(r=>{const d=dBR(r.dtPub);return d&&(hoje-d)/864e5<=7;}).length,
+     'Publicações nos últimos 7 dias — prazos possivelmente em curso', 'var(--danger)'],
+    ['parado180', ROWS.filter(r=>r.dias!=null&&r.dias>180&&!/arquiv/i.test(r.situacao)).length,
+     'Parados há mais de 180 dias (fora arquivados)', 'var(--warning)'],
+    ['semPub', ROWS.filter(r=>r.qtdPub===0&&r.qtdMov>0).length,
+     'Com movimentação, mas sem nenhuma publicação no DJEN', 'var(--info)'],
+    ['semFonte', ROWS.filter(r=>/sem dados/i.test(r.situacao)).length,
+     'Sem retorno no DataJud e no DJEN — conferir número ou sigilo', 'var(--neutral)'],
+    ['cumprimento', ROWS.filter(r=>/cumprimento/i.test(r.tipo)).length,
+     'Em cumprimento de sentença — foco de recebimento', 'var(--green)'],
+    ['recursos', ROWS.filter(r=>/apelacao|agravo/i.test(nrm(r.tipo))).length,
+     'Recursos (apelação / agravo) em curso', 'var(--primary)']
+  ];
+  $('#alertas').innerHTML = A.map(a=>
+    '<div class="al" style="--c:'+a[3]+'" data-f="'+a[0]+'"><div class="n mono">'+fmtN(a[1])+'</div><div class="t">'+a[2]+'</div></div>').join('');
+  $$('#alertas .al').forEach(el=>el.onclick=()=>{ FILTRO={alerta:el.dataset.f}; sincronizarSelects(); tabela(); $('.tabwrap').scrollIntoView({behavior:'smooth'}); });
+}
+
+/* ------------------------------ gráficos ------------------------------ */
+const PAL = ['#C4A028','#42a5f5','#43a047','#ef5350','#ff8f00','#8e7cc3','#26a69a','#ec407a','#6b82a8','#7e57c2','#26c6da','#9ccc65'];
+function chart(id, tipo, labels, dados, opts){
+  if(CHARTS[id]) CHARTS[id].destroy();
+  const ctx = document.getElementById(id);
+  const cores = tipo==='bar' ? '#C4A028' : PAL;
+  CHARTS[id] = new Chart(ctx, {
+    type: tipo,
+    data: { labels, datasets: [{ data: dados,
+            backgroundColor: tipo==='line' ? 'rgba(196,160,40,.15)' : cores,
+            borderColor: tipo==='line' ? '#C4A028' : 'transparent',
+            borderWidth: tipo==='line' ? 2 : 0,
+            fill: tipo==='line', tension:.3 }] },
+    options: Object.assign({
+      responsive:true, maintainAspectRatio:false,
+      plugins:{ legend:{ display: tipo!=='bar'&&tipo!=='line',
+                position:'right', labels:{ color:'#6b82a8', font:{size:11}, boxWidth:11 } },
+                tooltip:{ backgroundColor:'#0a1730', borderColor:'#1a2f54', borderWidth:1 } },
+      scales: (tipo==='bar'||tipo==='line') ? {
+        x:{ ticks:{ color:'#6b82a8', font:{size:10} }, grid:{ display:false } },
+        y:{ ticks:{ color:'#6b82a8', font:{size:10} }, grid:{ color:'rgba(26,47,84,.5)' }, beginAtZero:true }
+      } : {}
+    }, opts||{})
+  });
+}
+function contar(campo, max){
+  const m = {};
+  ROWS.forEach(r=>{ const k = String(r[campo]||'—'); m[k]=(m[k]||0)+1; });
+  let e = Object.entries(m).sort((a,b)=>b[1]-a[1]);
+  if(max && e.length>max){ const resto=e.slice(max).reduce((s,x)=>s+x[1],0); e=e.slice(0,max); if(resto) e.push(['Outros',resto]); }
+  return e;
+}
+function graficos(){
+  let e = contar('tipo');           chart('cTipo','doughnut', e.map(x=>x[0]), e.map(x=>x[1]));
+  e = contar('fase');               chart('cFase','doughnut', e.map(x=>x[0]), e.map(x=>x[1]));
+  e = contar('tribunal',12);        chart('cTrib','bar', e.map(x=>x[0]), e.map(x=>x[1]));
+
+  const meses = {};
+  ROWS.forEach(r=>{ const d=dBR(r.dtPub); if(!d) return; const k=d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0'); meses[k]=(meses[k]||0)+1; });
+  const mk = Object.keys(meses).sort().slice(-18);
+  chart('cPub','line', mk.map(k=>k.slice(5)+'/'+k.slice(2,4)), mk.map(k=>meses[k]));
+
+  const anos = {};
+  ROWS.forEach(r=>{ const a=anoDe(r); if(a&&a>1990) anos[a]=(anos[a]||0)+1; });
+  const ak = Object.keys(anos).sort();
+  chart('cAno','bar', ak, ak.map(k=>anos[k]));
+
+  const faixas = [['0–30d',0,30],['31–90d',31,90],['91–180d',91,180],['181–365d',181,365],['+1 ano',366,1e9]];
+  const cnt = faixas.map(f=>ROWS.filter(r=>r.dias!=null&&r.dias>=f[1]&&r.dias<=f[2]).length);
+  chart('cIdade','bar', faixas.map(f=>f[0]), cnt);
+}
+
+/* ------------------------------ tabela ------------------------------- */
+const COLUNAS_TAB = [
+  ['num','Nº do processo'],['tipo','Tipo'],['cliente','Cliente'],['tribunal','Trib.'],
+  ['vara','Vara / órgão'],['fase','Fase'],['situacao','Situação'],['dias','Dias parado'],
+  ['qtdMov','Mov.'],['qtdPub','Pub.'],['dtPub','Últ. publicação'],['ultMov','Última movimentação']
+];
+function montarFiltros(){
+  const op = (sel, campo, rot) => {
+    const vals = [...new Set(ROWS.map(r=>String(r[campo]||'').trim()).filter(Boolean))].sort();
+    const atual = $(sel).value;
+    $(sel).innerHTML = '<option value="">'+rot+' (todos)</option>' + vals.map(v=>'<option>'+esc(v)+'</option>').join('');
+    if(atual) $(sel).value = atual;
+  };
+  op('#fTipo','tipo','Tipo'); op('#fFase','fase','Fase'); op('#fSituacao','situacao','Situação');
+  op('#fTribunal','tribunal','Tribunal'); op('#fGrau','grau','Grau');
+}
+function sincronizarSelects(){
+  $('#fTipo').value = FILTRO.tipo||''; $('#fFase').value = FILTRO.fase||'';
+  $('#fSituacao').value = FILTRO.situacao||''; $('#fTribunal').value = FILTRO.tribunal||'';
+  $('#fGrau').value = FILTRO.grau||'';
+  if(FILTRO.busca===undefined) $('#fBusca').value = '';
+}
+function filtrar(){
+  const hoje = new Date();
+  return ROWS.filter(r=>{
+    if(FILTRO.tipo && r.tipo!==FILTRO.tipo) return false;
+    if(FILTRO.fase && r.fase!==FILTRO.fase) return false;
+    if(FILTRO.situacao && r.situacao!==FILTRO.situacao) return false;
+    if(FILTRO.tribunal && r.tribunal!==FILTRO.tribunal) return false;
+    if(FILTRO.grau && r.grau!==FILTRO.grau) return false;
+    if(FILTRO.pub30){ const d=dBR(r.dtPub); if(!(d&&(hoje-d)/864e5<=30)) return false; }
+    if(FILTRO.novos12m){ const d=dBR(r.ajuizamento); if(!(d&&(hoje-d)/864e5<=365)) return false; }
+    if(FILTRO.alerta==='pub7'){ const d=dBR(r.dtPub); if(!(d&&(hoje-d)/864e5<=7)) return false; }
+    if(FILTRO.alerta==='parado180' && !(r.dias!=null&&r.dias>180&&!/arquiv/i.test(r.situacao))) return false;
+    if(FILTRO.alerta==='semPub' && !(r.qtdPub===0&&r.qtdMov>0)) return false;
+    if(FILTRO.alerta==='semFonte' && !/sem dados/i.test(r.situacao)) return false;
+    if(FILTRO.alerta==='cumprimento' && !/cumprimento/i.test(r.tipo)) return false;
+    if(FILTRO.alerta==='recursos' && !/apelacao|agravo/i.test(nrm(r.tipo))) return false;
+    if(FILTRO.busca){
+      const q = nrm(FILTRO.busca);
+      const alvo = nrm([r.num,r.partes,r.cliente,r.assunto,r.vara,r.orgao,r.classe,r.ultMov,r.ultPub,r.tribunal].join(' '));
+      if(alvo.indexOf(q)<0 && String(r.num).replace(/\D/g,'').indexOf(q.replace(/\D/g,''))<0) return false;
+    }
+    return true;
+  });
+}
+function tabela(){
+  const L = filtrar();
+  L.sort((a,b)=>{
+    const c=ORDEM.campo; let x=a[c], y=b[c];
+    if(c==='dias'||c==='qtdMov'||c==='qtdPub'||c==='valor'){ x=x==null?-1:x; y=y==null?-1:y; return ORDEM.asc?x-y:y-x; }
+    if(c==='dtPub'||c==='dtMov'){ const dx=dBR(x)||new Date(0), dy=dBR(y)||new Date(0); return ORDEM.asc?dx-dy:dy-dx; }
+    x=nrm(x); y=nrm(y); return ORDEM.asc ? x.localeCompare(y) : y.localeCompare(x);
+  });
+  $('#thead').innerHTML = '<tr>'+COLUNAS_TAB.map(c=>'<th data-c="'+c[0]+'">'+c[1]+(ORDEM.campo===c[0]?(ORDEM.asc?' ▲':' ▼'):'')+'</th>').join('')+'</tr>';
+  $$('#thead th').forEach(th=>th.onclick=()=>{ const c=th.dataset.c; ORDEM = {campo:c, asc: ORDEM.campo===c ? !ORDEM.asc : false}; tabela(); });
+
+  const vis = L.slice(0,600);
+  $('#tbody').innerHTML = vis.map(r=>'<tr data-l="'+r.linha+'">'+
+    '<td class="mono" style="white-space:nowrap">'+esc(r.num)+'</td>'+
+    '<td>'+chipTipo(r.tipo)+'</td>'+
+    '<td><span class="trunc" style="max-width:170px">'+esc(r.cliente||r.partes||'—')+'</span></td>'+
+    '<td>'+esc(r.tribunal)+'</td>'+
+    '<td><span class="trunc" style="max-width:190px">'+esc(r.vara||r.orgao||'—')+'</span></td>'+
+    '<td>'+esc(r.fase)+'</td>'+
+    '<td>'+chipSit(r.situacao)+'</td>'+
+    '<td class="mono">'+(r.dias==null?'—':fmtN(r.dias))+'</td>'+
+    '<td class="mono">'+fmtN(r.qtdMov)+'</td>'+
+    '<td class="mono">'+fmtN(r.qtdPub)+'</td>'+
+    '<td class="mono" style="white-space:nowrap">'+esc(r.dtPub||'—')+'</td>'+
+    '<td><span class="trunc">'+esc(r.ultMov||'—')+'</span></td>'+
+    '</tr>').join('');
+  $$('#tbody tr').forEach(tr=>tr.onclick=()=>abrirDetalhe(+tr.dataset.l));
+  $('#tabInfo').textContent = fmtN(L.length)+' de '+fmtN(ROWS.length)+' processos'+(L.length>600?' · exibindo os 600 primeiros':'');
+}
+function chipTipo(t){
+  const c = /cumprimento/i.test(t)?'var(--green)':/agravo/i.test(t)?'var(--warning)':/apelac/i.test(nrm(t))?'var(--info)':'var(--neutral)';
+  const bg= /cumprimento/i.test(t)?'var(--green-light)':/agravo/i.test(t)?'var(--warning-light)':/apelac/i.test(nrm(t))?'var(--info-light)':'var(--neutral-light)';
+  return '<span class="chip" style="color:'+c+';background:'+bg+'">'+esc(t)+'</span>';
+}
+function chipSit(s){
+  const c = s==='Ativo'?'var(--green)':s==='Estagnado'?'var(--danger)':/arquiv/i.test(s)?'var(--neutral)':'var(--text-muted)';
+  const bg= s==='Ativo'?'var(--green-light)':s==='Estagnado'?'var(--danger-light)':'var(--neutral-light)';
+  return '<span class="chip" style="color:'+c+';background:'+bg+'">'+esc(s)+'</span>';
+}
+
+/* ------------------------------ detalhe ------------------------------ */
+const CACHE_TXT = {};
+async function textoProcesso(linha){
+  if(CACHE_TXT[linha]) return CACHE_TXT[linha];
+  const vr = await sheets(["'"+ABA+"'!N"+linha+":O"+linha]);
+  const v = (vr[0].values&&vr[0].values[0])||[];
+  CACHE_TXT[linha] = { mov: String(v[0]||''), pub: String(v[1]||'') };
+  return CACHE_TXT[linha];
+}
+async function abrirDetalhe(linha){
+  const r = ROWS.find(x=>x.linha===linha); if(!r) return;
+  $('#dTitulo').textContent = r.num;
+  $('#ov').classList.add('on'); $('#drawer').classList.add('on');
+  $('#dBody').innerHTML =
+    '<dl class="dl">'+
+    ln('Tipo de processo', r.tipo) + ln('Partes', r.partes) + ln('Cliente / polo', r.cliente) +
+    ln('Tribunal', r.tribunal) + ln('Grau', r.grau) + ln('Vara de origem', r.vara) +
+    ln('Órgão julgador', r.orgao) + ln('Classe', r.classe) + ln('Assunto', r.assunto) +
+    ln('Ajuizamento', r.ajuizamento) + ln('Sistema / formato', [r.sistema,r.formato].filter(Boolean).join(' · ')) +
+    ln('Nível de sigilo', String(r.sigilo)) + ln('Fase processual', r.fase) + ln('Situação', r.situacao) +
+    ln('Dias sem movimentação', r.dias==null?'—':fmtN(r.dias)) +
+    ln('Valor da causa', r.valor?fmtM(r.valor):'—') +
+    ln('Movimentos · publicações', fmtN(r.qtdMov)+' · '+fmtN(r.qtdPub)) +
+    ln('Origem do cadastro', r.origem) + ln('Atualizado em', r.atualizado) +
+    '</dl>'+
+    '<div class="tabs"><div class="tab on" data-t="mov">Movimentos (DataJud)</div>'+
+    '<div class="tab" data-t="pub">Publicações no DJEN</div></div>'+
+    '<div id="dConteudo" style="color:var(--text-sub)">Carregando…</div>';
+  $$('#dBody .tab').forEach(t=>t.onclick=()=>{ $$('#dBody .tab').forEach(x=>x.classList.remove('on')); t.classList.add('on'); pintarTexto(linha, t.dataset.t); });
+  pintarTexto(linha,'mov');
+}
+const ln = (k,v) => v ? '<dt>'+esc(k)+'</dt><dd>'+esc(v)+'</dd>' : '';
+async function pintarTexto(linha, qual){
+  const box = $('#dConteudo'); box.textContent='Carregando…';
+  let t; try{ t = await textoProcesso(linha); }catch(e){ box.textContent='Erro ao carregar: '+e.message; return; }
+  const bruto = qual==='mov'? t.mov : t.pub;
+  if(!bruto.trim()){ box.textContent = qual==='mov'
+      ? 'Nenhuma movimentação retornada pelo DataJud para este processo.'
+      : 'Nenhuma publicação deste processo encontrada no DJEN.'; return; }
+  let itens;
+  if(qual==='mov'){
+    itens = bruto.split('\n').filter(Boolean).map(l=>{
+      const m = l.match(/^\[([^\]]*)\]\s*(\d{2}\/\d{2}\/\d{4})\s*-\s*([\s\S]*)$/);
+      return m ? {d:m[2]+'  ·  '+m[1], t:m[3]} : {d:'', t:l};
+    });
+  }else{
+    itens = bruto.split(/\n\n-{6,}\n\n/).map(bloco=>{
+      const l = bloco.split('\n');
+      const m = (l[0]||'').match(/^\[(\d{2}\/\d{2}\/\d{4})\]\s*(.*)$/);
+      return m ? {d:m[1]+'  ·  '+m[2], t:l.slice(1).join('\n')} : {d:'', t:bloco};
+    });
+  }
+  box.innerHTML = '<div class="tl">'+itens.map(i=>
+    '<div class="it">'+(i.d?'<div class="d mono">'+esc(i.d)+'</div>':'')+'<div class="txt">'+esc(i.t)+'</div></div>').join('')+'</div>';
+}
+function fechar(){ $('#ov').classList.remove('on'); $('#drawer').classList.remove('on'); }
+
+/* =====================================================================
+   CONSULTOR I.A. — Claude Sonnet 5 com tool use sobre a planilha
+   ===================================================================== */
+const getKey = () => { try{ return localStorage.getItem(LS_KEY)||''; }catch(e){ return ''; } };
+let HIST = [];
+
+const TOOLS = [
+{
+  name:'consultar_base',
+  description:'Filtra e conta processos da carteira. Devolve totais, quebras por campo e uma amostra de linhas. Use SEMPRE que a pergunta envolver quantidade, lista, ranking ou recorte da carteira.',
+  input_schema:{ type:'object', properties:{
+    tipo:{type:'string',description:'Tipo de Processo: Processo Principal, Cumprimento de Sentenca, Agravo de Instrumento ou Recurso de Apelacao'},
+    fase:{type:'string'}, situacao:{type:'string',description:'Ativo, Estagnado, Arquivado / baixado ou Sem dados nas fontes'},
+    tribunal:{type:'string'}, grau:{type:'string'}, cliente:{type:'string'}, assunto:{type:'string'},
+    texto:{type:'string',description:'busca livre em número, partes, vara, assunto, última movimentação'},
+    dias_sem_movimentacao_min:{type:'number'}, dias_sem_movimentacao_max:{type:'number'},
+    ajuizado_de_ano:{type:'number'}, ajuizado_ate_ano:{type:'number'},
+    publicacao_ultimos_dias:{type:'number',description:'só processos com publicação no DJEN nos últimos N dias'},
+    sem_publicacao:{type:'boolean'}, valor_causa_min:{type:'number'},
+    agrupar_por:{type:'string',description:'tipo, fase, situacao, tribunal, grau, cliente, assunto, ano'},
+    ordenar_por:{type:'string',description:'dias, qtdMov, qtdPub, valor, dtPub'},
+    limite:{type:'number',description:'quantas linhas da amostra devolver (máx. 40)'}
+  }, required:[] }
+},
+{
+  name:'ler_processo',
+  description:'Lê um processo específico por número, incluindo TODAS as movimentações do DataJud e TODAS as publicações do DJEN. Use para perguntas sobre o andamento, o teor de uma publicação ou o histórico de um processo.',
+  input_schema:{ type:'object', properties:{
+    numero:{type:'string',description:'número CNJ, com ou sem máscara'},
+    trecho:{type:'string',description:'movimentos, publicacoes ou tudo'}
+  }, required:['numero'] }
+},
+{
+  name:'panorama',
+  description:'Retorna o panorama executivo da carteira inteira: totais, distribuições por tipo/fase/situação/tribunal, idade média, valores e alertas. Use para perguntas abertas de gestão e estratégia.',
+  input_schema:{ type:'object', properties:{}, required:[] }
+}];
+
+function execConsultar(inp){
+  inp = inp||{}; const hoje = new Date();
+  let L = ROWS.filter(r=>{
+    if(inp.tipo && nrm(r.tipo).indexOf(nrm(inp.tipo))<0) return false;
+    if(inp.fase && nrm(r.fase).indexOf(nrm(inp.fase))<0) return false;
+    if(inp.situacao && nrm(r.situacao).indexOf(nrm(inp.situacao))<0) return false;
+    if(inp.tribunal && nrm(r.tribunal)!==nrm(inp.tribunal)) return false;
+    if(inp.grau && nrm(r.grau).indexOf(nrm(inp.grau))<0) return false;
+    if(inp.cliente && nrm(r.cliente+' '+r.partes).indexOf(nrm(inp.cliente))<0) return false;
+    if(inp.assunto && nrm(r.assunto).indexOf(nrm(inp.assunto))<0) return false;
+    if(inp.texto){ const q=nrm(inp.texto);
+      if(nrm([r.num,r.partes,r.cliente,r.assunto,r.vara,r.orgao,r.classe,r.ultMov,r.ultPub].join(' ')).indexOf(q)<0) return false; }
+    if(inp.dias_sem_movimentacao_min!=null && !(r.dias!=null&&r.dias>=inp.dias_sem_movimentacao_min)) return false;
+    if(inp.dias_sem_movimentacao_max!=null && !(r.dias!=null&&r.dias<=inp.dias_sem_movimentacao_max)) return false;
+    const a = anoDe(r);
+    if(inp.ajuizado_de_ano!=null && !(a&&a>=inp.ajuizado_de_ano)) return false;
+    if(inp.ajuizado_ate_ano!=null && !(a&&a<=inp.ajuizado_ate_ano)) return false;
+    if(inp.publicacao_ultimos_dias!=null){ const d=dBR(r.dtPub); if(!(d&&(hoje-d)/864e5<=inp.publicacao_ultimos_dias)) return false; }
+    if(inp.sem_publicacao===true && r.qtdPub>0) return false;
+    if(inp.valor_causa_min!=null && !(r.valor>=inp.valor_causa_min)) return false;
+    return true;
+  });
+  const ord = inp.ordenar_por||'dias';
+  L = L.slice().sort((x,y)=>{
+    if(ord==='dtPub'){ return (dBR(y.dtPub)||0)-(dBR(x.dtPub)||0); }
+    return (y[ord]==null?-1:y[ord]) - (x[ord]==null?-1:x[ord]);
+  });
+  const out = { total_encontrado:L.length, total_na_base:ROWS.length };
+  if(inp.agrupar_por){
+    const campo = {tipo:'tipo',fase:'fase',situacao:'situacao',tribunal:'tribunal',grau:'grau',
+                   cliente:'cliente',assunto:'assunto',ano:'__ano'}[nrm(inp.agrupar_por)] || 'tipo';
+    const m={}; L.forEach(r=>{ const k = campo==='__ano' ? String(anoDe(r)||'—') : String(r[campo]||'—'); m[k]=(m[k]||0)+1; });
+    out.distribuicao = Object.entries(m).sort((a,b)=>b[1]-a[1]).slice(0,30)
+      .map(e=>({valor:e[0], processos:e[1]}));
+  }
+  const vals = L.map(r=>r.valor).filter(v=>v>0);
+  if(vals.length){ vals.sort((a,b)=>a-b);
+    out.valor_causa = { soma:Math.round(vals.reduce((s,v)=>s+v,0)), mediana:Math.round(vals[Math.floor(vals.length/2)]), com_valor:vals.length }; }
+  const ds = L.map(r=>r.dias).filter(d=>d!=null);
+  if(ds.length) out.dias_sem_movimentacao = { media:Math.round(ds.reduce((s,d)=>s+d,0)/ds.length), maximo:Math.max.apply(null,ds) };
+  const lim = Math.min(Math.max(1, inp.limite||12), 40);
+  out.amostra = L.slice(0,lim).map(r=>({
+    numero:r.num, tipo:r.tipo, cliente:r.cliente||r.partes, tribunal:r.tribunal, vara:r.vara,
+    fase:r.fase, situacao:r.situacao, dias_sem_movimentacao:r.dias,
+    movimentos:r.qtdMov, publicacoes:r.qtdPub, ultima_movimentacao:r.ultMov,
+    data_ultima_movimentacao:r.dtMov, data_ultima_publicacao:r.dtPub,
+    ajuizamento:r.ajuizamento, valor_causa:r.valor||null, assunto:r.assunto
+  }));
+  return out;
+}
+
+async function execLer(inp){
+  const q = String(inp.numero||'').replace(/\D/g,'');
+  const r = ROWS.find(x=>String(x.num).replace(/\D/g,'')===q) ||
+            ROWS.find(x=>String(x.num).replace(/\D/g,'').indexOf(q)>=0);
+  if(!r) return { erro:'Processo não encontrado na base.', dica:'Confira o número; a base tem '+ROWS.length+' processos.' };
+  let t; try{ t = await textoProcesso(r.linha); }catch(e){ t={mov:'',pub:''}; }
+  const qual = nrm(inp.trecho||'tudo');
+  const o = { numero:r.num, tipo:r.tipo, partes:r.partes, cliente:r.cliente, tribunal:r.tribunal,
+              grau:r.grau, vara:r.vara, orgao:r.orgao, classe:r.classe, assunto:r.assunto,
+              ajuizamento:r.ajuizamento, fase:r.fase, situacao:r.situacao,
+              dias_sem_movimentacao:r.dias, valor_causa:r.valor||null,
+              total_movimentos:r.qtdMov, total_publicacoes:r.qtdPub };
+  const corta = s => s.length>16000 ? s.slice(0,16000)+' […texto truncado]' : s;
+  if(qual!=='publicacoes') o.movimentos = corta(t.mov) || '(sem movimentações no DataJud)';
+  if(qual!=='movimentos')  o.publicacoes = corta(t.pub) || '(sem publicações no DJEN)';
+  return o;
+}
+
+function execPanorama(){
+  const hoje = new Date();
+  const g = campo => { const m={}; ROWS.forEach(r=>{ const k=String(r[campo]||'—'); m[k]=(m[k]||0)+1; });
+                       return Object.entries(m).sort((a,b)=>b[1]-a[1]).slice(0,15).map(e=>({valor:e[0],processos:e[1]})); };
+  const vals = ROWS.map(r=>r.valor).filter(v=>v>0).sort((a,b)=>a-b);
+  const ds = ROWS.map(r=>r.dias).filter(d=>d!=null);
+  return {
+    total_processos: ROWS.length,
+    por_tipo: g('tipo'), por_fase: g('fase'), por_situacao: g('situacao'), por_tribunal: g('tribunal'),
+    valor_causa: vals.length? { soma:Math.round(vals.reduce((s,v)=>s+v,0)), mediana:Math.round(vals[Math.floor(vals.length/2)]), com_valor:vals.length } : null,
+    dias_sem_movimentacao: ds.length? { media:Math.round(ds.reduce((s,d)=>s+d,0)/ds.length), acima_de_180:ROWS.filter(r=>r.dias!=null&&r.dias>180).length } : null,
+    publicacoes_ultimos_7_dias: ROWS.filter(r=>{const d=dBR(r.dtPub);return d&&(hoje-d)/864e5<=7;}).length,
+    publicacoes_ultimos_30_dias: ROWS.filter(r=>{const d=dBR(r.dtPub);return d&&(hoje-d)/864e5<=30;}).length,
+    ajuizados_ultimos_12_meses: ROWS.filter(r=>{const d=dBR(r.ajuizamento);return d&&(hoje-d)/864e5<=365;}).length,
+    sem_retorno_nas_fontes: ROWS.filter(r=>/sem dados/i.test(r.situacao)).length,
+    total_movimentos: ROWS.reduce((s,r)=>s+r.qtdMov,0),
+    total_publicacoes: ROWS.reduce((s,r)=>s+r.qtdPub,0),
+    ultima_sincronizacao: (SYNC&&SYNC.ultimaOk)||'—'
+  };
+}
+
+function systemPrompt(){
+  const d = c => [...new Set(ROWS.map(r=>String(r[c]||'').trim()).filter(Boolean))];
+  return [
+'Você é o consultor de gestão da carteira processual da Borges Macedo Advocacia e Consultoria.',
+'Responda como um gestor de departamento jurídico e CEO de escritório: prioridade, risco, dinheiro, prazo e capacidade da equipe — não como um estagiário descrevendo processos.',
+'',
+'A base tem '+ROWS.length+' processos, alimentada automaticamente pela API Pública do DataJud (CNJ) e pelo DJEN.',
+'Para QUALQUER pergunta quantitativa, de lista ou de recorte, chame consultar_base e use SOMENTE os números devolvidos. Nunca estime.',
+'Para perguntas abertas de estratégia, comece por panorama. Para o andamento ou o teor de um processo específico, use ler_processo.',
+'',
+'Valores existentes na base (use exatamente ao filtrar):',
+'- tipo: '+d('tipo').join(' | '),
+'- fase: '+d('fase').join(' | '),
+'- situacao: '+d('situacao').join(' | '),
+'- tribunais: '+d('tribunal').slice(0,40).join(', '),
+'',
+'Definições da casa:',
+'- "Estagnado" = mais de 90 dias sem movimentação nem publicação. "Dias sem movimentação" considera o evento mais recente entre DataJud e DJEN.',
+'- Publicação recente no DJEN = prazo provavelmente em curso; é o alerta operacional mais urgente.',
+'- Tipo de processo vem da classe CNJ do registro mais recente: Processo Principal, Cumprimento de Sentença, Agravo de Instrumento ou Recurso de Apelação.',
+'- "Sem dados nas fontes" costuma significar número errado, segredo de justiça ou tribunal que não alimenta o DataJud — é um problema de cadastro, não de mérito.',
+'',
+'Estilo: português do Brasil, direto, começando pelo número ou pela conclusão. Depois, no máximo 3 a 5 pontos de leitura gerencial (risco, prioridade, o que fazer). Cite os filtros usados. Se a pergunta for ambígua, assuma a leitura mais útil e declare a suposição. Não exponha raciocínio interno.'
+  ].join('\n');
+}
+
+async function callClaude(messages){
+  const res = await fetch('https://api.anthropic.com/v1/messages',{
+    method:'POST',
+    headers:{'content-type':'application/json','x-api-key':getKey(),
+             'anthropic-version':'2023-06-01','anthropic-dangerous-direct-browser-access':'true'},
+    body: JSON.stringify({ model:CHAT_MODEL, max_tokens:2000, system:systemPrompt(), tools:TOOLS, messages })
+  });
+  let data; try{ data = await res.json(); }catch(e){ throw new Error('Resposta inválida da API (HTTP '+res.status+')'); }
+  if(!res.ok) throw new Error((data&&data.error&&data.error.message)||('HTTP '+res.status));
+  return data;
+}
+
+function msg(classe, quem, texto){
+  const d = document.createElement('div');
+  d.className='msg '+classe;
+  d.innerHTML='<div class="who">'+quem+'</div><div class="body">'+esc(texto)+'</div>';
+  $('#iaBox').appendChild(d); $('#iaBox').scrollTop = $('#iaBox').scrollHeight;
+  return d;
+}
+
+async function perguntar(texto){
+  if(!texto.trim()) return;
+  if(!getKey()){ $('#keybar').classList.remove('hide'); $('#apiKey').focus(); return; }
+  if(!ROWS.length){ msg('a','Consultor','A planilha ainda está vazia — rode a sincronização antes de perguntar.'); return; }
+  msg('u','Você',texto);
+  $('#iaInput').value=''; $('#btnPerg').disabled=true;
+  const pensando = msg('a','Consultor','Consultando a base…');
+  HIST.push({role:'user',content:texto});
+  try{
+    for(let volta=0; volta<6; volta++){
+      const r = await callClaude(HIST);
+      HIST.push({role:'assistant',content:r.content});
+      const usos = (r.content||[]).filter(b=>b.type==='tool_use');
+      const txt  = (r.content||[]).filter(b=>b.type==='text').map(b=>b.text).join('\n').trim();
+      if(!usos.length){
+        pensando.querySelector('.body').textContent = txt || '(sem resposta)';
+        break;
+      }
+      pensando.querySelector('.body').textContent = 'Consultando a base ('+usos.map(u=>u.name).join(', ')+')…';
+      const resultados = [];
+      for(const u of usos){
+        let out;
+        try{
+          out = u.name==='consultar_base' ? execConsultar(u.input)
+              : u.name==='ler_processo'   ? await execLer(u.input)
+              : execPanorama();
+        }catch(e){ out = { erro:String(e.message||e) }; }
+        resultados.push({ type:'tool_result', tool_use_id:u.id, content: JSON.stringify(out) });
+      }
+      HIST.push({ role:'user', content: resultados });
+    }
+  }catch(e){
+    pensando.querySelector('.body').textContent = 'Erro: '+e.message;
+    if(/api.?key|authentication|invalid x-api-key/i.test(e.message)) $('#keybar').classList.remove('hide');
+  }
+  $('#btnPerg').disabled=false;
+}
+
+const SUGESTOES = [
+ 'Faça o panorama executivo da carteira e aponte os 3 riscos mais urgentes.',
+ 'Quais processos têm publicação no DJEN nos últimos 7 dias?',
+ 'Quantos processos estão parados há mais de 180 dias e em quais tribunais?',
+ 'Como está dividida a carteira entre processo principal, cumprimento de sentença e recursos?',
+ 'Onde está concentrado o maior valor de causa e qual a fase desses processos?',
+ 'Quais processos não retornaram dados nas fontes e precisam de correção de cadastro?'
+];
+
+/* =====================================================================
+   EVENTOS / BOOT
+   ===================================================================== */
+$('#btnAtualizar').onclick = atualizar;
+$('#btnCfg').onclick = () => abrirConfig();
+$('#btnFechar').onclick = fechar;
+$('#ov').onclick = fechar;
+document.addEventListener('keydown', e=>{ if(e.key==='Escape') fechar(); });
+$('#fBusca').oninput = e => { FILTRO.busca = e.target.value; tabela(); };
+const MAPA_FILTRO = { fTipo:'tipo', fFase:'fase', fSituacao:'situacao', fTribunal:'tribunal', fGrau:'grau' };
+Object.keys(MAPA_FILTRO).forEach(id=>{
+  $('#'+id).onchange = e => {
+    delete FILTRO.alerta; delete FILTRO.pub30; delete FILTRO.novos12m;
+    if(e.target.value) FILTRO[MAPA_FILTRO[id]] = e.target.value; else delete FILTRO[MAPA_FILTRO[id]];
+    tabela();
+  };
+});
+$('#btnLimpar').onclick = () => { FILTRO={}; $('#fBusca').value=''; sincronizarSelects(); tabela(); };
+$('#btnCSV').onclick = () => {
+  const L = filtrar();
+  const cab = ['Numero','Tipo','Cliente','Partes','Tribunal','Grau','Vara','Classe','Assunto','Ajuizamento',
+               'Fase','Situacao','Dias sem movimentacao','Movimentos','Publicacoes','Ultima movimentacao',
+               'Data ultima movimentacao','Data ultima publicacao','Valor da causa'];
+  const linhas = L.map(r=>[r.num,r.tipo,r.cliente,r.partes,r.tribunal,r.grau,r.vara,r.classe,r.assunto,
+    r.ajuizamento,r.fase,r.situacao,r.dias,r.qtdMov,r.qtdPub,r.ultMov,r.dtMov,r.dtPub,r.valor]);
+  const csv = [cab].concat(linhas).map(l=>l.map(c=>'"'+String(c==null?'':c).replace(/"/g,'""')+'"').join(';')).join('\n');
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(new Blob(['﻿'+csv],{type:'text/csv;charset=utf-8'}));
+  a.download = 'processos-datajud-djen.csv'; a.click();
+};
+$('#btnPerg').onclick = () => perguntar($('#iaInput').value);
+$('#iaInput').onkeydown = e => { if(e.key==='Enter' && (e.ctrlKey||e.metaKey)) perguntar($('#iaInput').value); };
+$('#btnKey').onclick = () => { const k=$('#apiKey').value.trim(); if(k){ localStorage.setItem(LS_KEY,k); $('#keybar').classList.add('hide'); msg('a','Consultor','Chave salva. Pode perguntar.'); } };
+$('#sugestoes').innerHTML = SUGESTOES.map((s,i)=>'<button data-s="'+i+'">'+esc(s)+'</button>').join('');
+$$('#sugestoes button').forEach(b=>b.onclick=()=>perguntar(SUGESTOES[+b.dataset.s]));
+if(!getKey()) $('#keybar').classList.remove('hide');
+
+carregar();
+setInterval(carregar, REFRESH_MS);
+</script>
+</body>
+</html>
