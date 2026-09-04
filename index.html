@@ -296,6 +296,7 @@
 
   <div class="card">
     <h2>Carteira de processos <span id="tabInfo"></span></h2>
+    <div id="avisoTram" style="font-size:12px;color:var(--text-sub);margin:-4px 0 10px"></div>
     <div class="filtros">
       <div class="busca-box">
         <input type="text" id="fBusca" placeholder="Buscar nº, parte, cliente, assunto, vara…">
@@ -473,21 +474,84 @@ async function carregar(){
     derivarEstado(u);
   }
   render();
+  /* Só depois de a tela existir: o painel abre rápido e se corrige sozinho
+     quando o histórico de andamentos terminar de chegar. */
+  setTimeout(carregarAndamentos, 300);
 }
 
 /* Dias sem movimento a partir dos quais o processo conta como estagnado.
    Mesmo corte usado pelo Apps Script ao gravar a coluna de situação. */
 const DIAS_ESTAGNADO = 90;
 
+/* ---------------------------------------------------------------------
+   ATIVO OU ARQUIVADO PELA CONSULTA PROCESSUAL
+
+   O que vale é o andamento registrado no tribunal, não uma palavra solta
+   na descrição da fase. Três observações que a leitura dos 3.168 processos
+   impôs:
+
+   · "Definitivo" é o nome que o DataJud dá ao arquivamento definitivo
+     (movimento filho de Arquivamento na tabela do CNJ). Aparece 565 vezes
+     como último andamento e não casa com /arquiv|baixa/ — eram centenas de
+     processos encerrados contados como ativos.
+   · Depois da baixa ainda saem publicação, expedição de certidão, decurso
+     de prazo. Isso é papelada da própria baixa; não devolve vida ao caso.
+   · A baixa em 1º grau não encerra o processo se há recurso vivo em 2º.
+     Por isso o estado é apurado POR GRAU, e basta um grau ativo para o
+     processo continuar ativo.
+   --------------------------------------------------------------------- */
+const MOV_ARQUIVA   = /^(baixa definitiva|definitivo|arquivamento|arquivado)\b/i;
+const MOV_DESARQUIVA= /^desarquiv/i;
+const MOV_PAPELADA  = /^(publica|expedi|documento|disponibiliza|ato ordinat|decurso de prazo|comunica|certid|juntada|remessa|recebimento|confirmad|mero expediente)/i;
+
+/* Cada linha do histórico vem como "[G1] 05/08/2026 - Nome (complementos)". */
+function lerAndamentos(texto){
+  const out = [];
+  for (const linha of String(texto||'').split('\n')){
+    const m = /^\[([^\]]*)\]\s*([\d/]*)\s*-\s*(.+)$/.exec(linha);
+    if (!m) continue;
+    out.push({ grau: m[1], data: m[2], nome: m[3].replace(/\s*\(.*\)$/, '').trim() });
+  }
+  return out;
+}
+
+function situacaoNoTribunal(texto){
+  const L = lerAndamentos(texto);
+  if (!L.length) return null;                 // sem histórico: nada a afirmar
+  const porGrau = new Map();
+  for (const a of L){ if (!porGrau.has(a.grau)) porGrau.set(a.grau, []); porGrau.get(a.grau).push(a); }
+
+  let algumAtivo = false;
+  for (const [, andamentos] of porGrau){
+    let estado = 'Ativo';
+    for (const a of andamentos){
+      if (MOV_PAPELADA.test(a.nome)) continue;          // ruído pós-baixa
+      if (MOV_DESARQUIVA.test(a.nome)) { estado = 'Ativo'; break; }
+      if (MOV_ARQUIVA.test(a.nome))   { estado = 'Arquivado / baixado'; break; }
+      break;                                            // andamento de mérito: vivo
+    }
+    if (estado === 'Ativo') algumAtivo = true;
+  }
+  return algumAtivo ? 'Ativo' : 'Arquivado / baixado';
+}
+
 function derivarEstado(r){
   const semFonte = /sem dados/i.test(r.situacao) || (!r.qtdMov && !r.qtdPub);
-  /* Arquivamento é lido de duas fontes: da situação já calculada e da fase do
-     DataJud. Basta uma delas apontar baixa para o processo sair de "ativo". */
-  const arquivado = /arquiv|baixa/i.test(r.situacao) || /arquiv|baixa/i.test(r.fase);
 
-  r.tramitacao = semFonte ? 'Sem dados nas fontes'
-               : arquivado ? 'Arquivado / baixado'
-               : 'Ativo';
+  if (semFonte){
+    r.tramitacao = 'Sem dados nas fontes';
+    r.fonteTramitacao = 'sem retorno das fontes';
+  } else if (r.tramitacaoTribunal){
+    /* Veio da leitura do andamento processual — é a resposta boa. */
+    r.tramitacao = r.tramitacaoTribunal;
+    r.fonteTramitacao = 'consulta processual';
+  } else {
+    /* Enquanto o histórico não chega, vale a leitura da fase. Fica marcado
+       como estimativa para ninguém tomar decisão achando que é definitivo. */
+    r.tramitacao = /arquiv|baixa/i.test(r.situacao) || /arquiv|baixa/i.test(r.fase)
+      ? 'Arquivado / baixado' : 'Ativo';
+    r.fonteTramitacao = 'estimada pela fase';
+  }
 
   r.movimentacao = r.dias == null ? 'Sem data de movimento'
                  : r.dias > DIAS_ESTAGNADO ? 'Estagnado'
@@ -499,6 +563,70 @@ function derivarEstado(r){
     ? 'Sem dados nas fontes'
     : r.tramitacao + ' · ' + (r.movimentacao === 'Sem data de movimento'
         ? 'sem data de movimento' : r.movimentacao.toLowerCase());
+}
+
+/* ---------------------------------------------------------------------
+   O histórico de andamentos (coluna N) pesa 8 MB — carregá-lo junto com a
+   página atrasaria a abertura e voltaria a cada atualização automática. Ele
+   é buscado uma vez por sessão, em segundo plano: o painel abre com a
+   estimativa pela fase e se corrige sozinho quando o histórico chega.
+   --------------------------------------------------------------------- */
+let ANDAMENTOS_OK = false, ANDAMENTOS_CARREGANDO = false;
+
+async function carregarAndamentos(){
+  if (ANDAMENTOS_OK || ANDAMENTOS_CARREGANDO || !ROWS.length) return;
+  ANDAMENTOS_CARREGANDO = true;
+  avisoTramitacao('carregando');
+  try{
+    const ultima = ROWS.reduce((m, r) => Math.max(m, r.linha), 1);
+    const partes = [];
+    /* Em fatias, para não estourar o limite de tamanho de uma resposta. */
+    for (let ini = 2; ini <= ultima; ini += 1000)
+      partes.push("'" + ABA + "'!N" + ini + ":N" + Math.min(ini + 999, ultima));
+
+    const blocos = await sheets(partes);
+    const texto = {};
+    let linha = 2;
+    for (const bloco of blocos){
+      const vals = bloco.values || [];
+      for (let i = 0; i < vals.length; i++)
+        texto[linha + i] = String((vals[i] || [])[0] || '');
+      linha += 1000;
+    }
+
+    let corrigidos = 0;
+    for (const r of ROWS){
+      const t = texto[r.linha];
+      if (!t) continue;
+      const antes = r.tramitacao;
+      r.tramitacaoTribunal = situacaoNoTribunal(t);
+      derivarEstado(r);
+      if (r.tramitacao !== antes) corrigidos++;
+    }
+    ANDAMENTOS_OK = true;
+    avisoTramitacao('ok', corrigidos);
+    render();
+  }catch(e){
+    console.error(e);
+    avisoTramitacao('erro');
+  }finally{
+    ANDAMENTOS_CARREGANDO = false;
+  }
+}
+
+function avisoTramitacao(estado, corrigidos){
+  const el = $('#avisoTram');
+  if (!el) return;
+  if (estado === 'carregando')
+    el.innerHTML = '<span class="chip" style="color:var(--warning);background:var(--warning-light)">' +
+      'lendo o andamento processual…</span> a coluna Tramitação ainda mostra a estimativa pela fase';
+  else if (estado === 'ok')
+    el.innerHTML = '<span class="chip" style="color:var(--green);background:var(--green-light)">' +
+      'tramitação conferida no andamento processual</span>' +
+      (corrigidos ? ' · <b>' + fmtN(corrigidos) + '</b> processo(s) mudaram de estado em relação à estimativa' : '');
+  else
+    el.innerHTML = '<span class="chip" style="color:var(--danger);background:var(--danger-light)">' +
+      'não foi possível ler o andamento</span> a coluna Tramitação segue estimada pela fase';
 }
 
 /* =====================================================================
