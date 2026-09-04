@@ -41,6 +41,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <style>
   :root{
     --primary:#C4A028; --primary-mid:#E8C96A; --primary-light:rgba(196,160,40,.18); --primary-pale:rgba(196,160,40,.09);
@@ -126,6 +127,42 @@
   input[type=text]:focus,select:focus,textarea:focus{border-color:var(--primary);}
   input[type=text]{min-width:230px;}
   .chip{padding:4px 10px;border-radius:20px;font-size:11px;font-weight:600;display:inline-block;white-space:nowrap;}
+  .oculto{display:none !important;}
+
+  /* ---------- busca com botão ---------- */
+  .busca-box{display:flex;align-items:stretch;gap:0;}
+  .busca-box input[type=text]{border-top-right-radius:0;border-bottom-right-radius:0;min-width:250px;}
+  .btn-buscar{border-top-left-radius:0;border-bottom-left-radius:0;border-left:none;white-space:nowrap;}
+  .btn-limpa-busca{margin-left:6px;padding:8px 12px;font-size:15px;line-height:1;}
+
+  /* ---------- filtro de seleção múltipla ---------- */
+  .ms{position:relative;}
+  .ms-btn{background:var(--card2);border:1px solid var(--border);color:var(--text-main);
+          padding:8px 11px;border-radius:8px;font-size:12.5px;font-family:inherit;cursor:pointer;
+          display:inline-flex;align-items:center;gap:7px;white-space:nowrap;}
+  .ms-btn:hover{border-color:var(--primary-mid);}
+  .ms.ativo .ms-btn{border-color:var(--primary);color:var(--primary-mid);}
+  .ms-btn .seta{opacity:.55;font-size:10px;}
+  .ms-conta{background:var(--primary);color:#fff;border-radius:20px;padding:0 6px;
+            font-size:10.5px;font-weight:700;}
+  .ms-pop{position:absolute;z-index:40;top:calc(100% + 5px);left:0;min-width:260px;max-width:340px;
+          background:var(--card);border:1px solid var(--border);border-radius:10px;
+          box-shadow:0 14px 40px rgba(0,0,0,.55);padding:9px;}
+  .ms-pop input[type=text]{width:100%;min-width:0;margin-bottom:7px;}
+  .ms-lista{max-height:250px;overflow-y:auto;display:flex;flex-direction:column;gap:1px;}
+  .ms-lista::-webkit-scrollbar{width:8px;}
+  .ms-lista::-webkit-scrollbar-thumb{background:var(--border);border-radius:4px;}
+  .ms-item{display:flex;align-items:center;gap:8px;padding:5px 7px;border-radius:6px;
+           font-size:12.3px;cursor:pointer;line-height:1.35;}
+  .ms-item:hover{background:var(--primary-pale);}
+  .ms-item input{accent-color:var(--primary);flex:0 0 auto;cursor:pointer;}
+  .ms-item span{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+  .ms-item .qtd{color:var(--text-sub);font-size:11px;flex:0 0 auto;}
+  .ms-acoes{display:flex;gap:6px;margin-top:8px;padding-top:8px;border-top:1px solid var(--border);}
+  .ms-acoes button{flex:1;background:transparent;border:1px solid var(--border);color:var(--text-sub);
+                   border-radius:6px;padding:5px;font-size:11.5px;font-family:inherit;cursor:pointer;}
+  .ms-acoes button:hover{color:var(--text-main);border-color:var(--primary-mid);}
+  .ms-vazio{color:var(--text-sub);font-size:12px;padding:8px 7px;}
 
   /* ---------- tabela ---------- */
   .tabwrap{overflow:auto;max-height:640px;border:1px solid var(--border);border-radius:11px;}
@@ -260,19 +297,26 @@
   <div class="card">
     <h2>Carteira de processos <span id="tabInfo"></span></h2>
     <div class="filtros">
-      <input type="text" id="fBusca" placeholder="Buscar nº, parte, cliente, assunto, vara…">
-      <select id="fTipo"></select>
-      <select id="fFase"></select>
-      <select id="fSituacao"></select>
-      <select id="fTribunal"></select>
-      <select id="fGrau"></select>
-      <select id="fAno"></select>
-      <select id="fSentenca"></select>
-      <select id="fRecurso"></select>
-      <select id="fAlvara"></select>
-      <select id="fFaseCad"></select>
+      <div class="busca-box">
+        <input type="text" id="fBusca" placeholder="Buscar nº, parte, cliente, assunto, vara…">
+        <button class="btn btn-buscar" id="btnBuscar" title="Pesquisar (Enter)">&#128269; Pesquisar</button>
+        <button class="btn btn-limpa-busca oculto" id="btnLimparBusca" title="Limpar a busca">&times;</button>
+      </div>
+      <div class="ms" data-campo="tramitacao" data-rotulo="Tramitação"></div>
+      <div class="ms" data-campo="movimentacao" data-rotulo="Movimentação"></div>
+      <div class="ms" data-campo="tipo" data-rotulo="Tipo"></div>
+      <div class="ms" data-campo="fase" data-rotulo="Fase (DataJud)"></div>
+      <div class="ms" data-campo="situacao" data-rotulo="Situação (original)"></div>
+      <div class="ms" data-campo="tribunal" data-rotulo="Tribunal"></div>
+      <div class="ms" data-campo="grau" data-rotulo="Instância"></div>
+      <div class="ms" data-campo="ano" data-rotulo="Ano de distribuição"></div>
+      <div class="ms" data-campo="sentenca" data-rotulo="Sentença"></div>
+      <div class="ms" data-campo="recurso" data-rotulo="Recurso"></div>
+      <div class="ms" data-campo="alvara" data-rotulo="Alvará"></div>
+      <div class="ms" data-campo="faseCad" data-rotulo="Fase (cadastro)"></div>
       <button class="btn" id="btnLimpar">Limpar filtros</button>
       <button class="btn" id="btnCSV">Exportar CSV</button>
+      <button class="btn" id="btnXLSX">Exportar Excel</button>
     </div>
     <div class="tabwrap">
       <table><thead id="thead"></thead><tbody id="tbody"></tbody></table>
@@ -420,8 +464,41 @@ async function carregar(){
       faseCad: String(b[COL.faseCad]||'').trim(),
       alvara: String(b[COL.alvara]||'').trim()
     });
+    /* A coluna "situacao" da planilha é uma cascata: arquivado vence estagnado,
+       que vence ativo. Isso funde duas coisas independentes — se o processo
+       ainda tramita e se ele andou. Um processo ativo pode estar parado, e um
+       arquivado também. Aqui as duas dimensões voltam a ser separadas, sem
+       mexer na origem: a situação original continua exposta como está. */
+    const u = ROWS[ROWS.length-1];
+    derivarEstado(u);
   }
   render();
+}
+
+/* Dias sem movimento a partir dos quais o processo conta como estagnado.
+   Mesmo corte usado pelo Apps Script ao gravar a coluna de situação. */
+const DIAS_ESTAGNADO = 90;
+
+function derivarEstado(r){
+  const semFonte = /sem dados/i.test(r.situacao) || (!r.qtdMov && !r.qtdPub);
+  /* Arquivamento é lido de duas fontes: da situação já calculada e da fase do
+     DataJud. Basta uma delas apontar baixa para o processo sair de "ativo". */
+  const arquivado = /arquiv|baixa/i.test(r.situacao) || /arquiv|baixa/i.test(r.fase);
+
+  r.tramitacao = semFonte ? 'Sem dados nas fontes'
+               : arquivado ? 'Arquivado / baixado'
+               : 'Ativo';
+
+  r.movimentacao = r.dias == null ? 'Sem data de movimento'
+                 : r.dias > DIAS_ESTAGNADO ? 'Estagnado'
+                 : 'Em movimento';
+
+  /* O cruzamento das duas — é o que responde "ativo e parado" ou
+     "arquivado e parado", que a coluna única não conseguia dizer. */
+  r.estado = r.tramitacao === 'Sem dados nas fontes'
+    ? 'Sem dados nas fontes'
+    : r.tramitacao + ' · ' + (r.movimentacao === 'Sem data de movimento'
+        ? 'sem data de movimento' : r.movimentacao.toLowerCase());
 }
 
 /* =====================================================================
@@ -503,10 +580,14 @@ function avisoSetup(){
 
 function kpis(){
   const R = ROWS;
-  const ativos     = R.filter(r=>r.situacao==='Ativo').length;
-  const estag      = R.filter(r=>r.situacao==='Estagnado').length;
-  const arq        = R.filter(r=>/arquiv/i.test(r.situacao)).length;
-  const semDados   = R.filter(r=>/sem dados/i.test(r.situacao)).length;
+  const ativos     = R.filter(r=>r.tramitacao==='Ativo').length;
+  const arq        = R.filter(r=>r.tramitacao==='Arquivado / baixado').length;
+  const semDados   = R.filter(r=>r.tramitacao==='Sem dados nas fontes').length;
+  const estag      = R.filter(r=>r.movimentacao==='Estagnado').length;
+  /* O cruzamento que a coluna única não dava: parado E ainda tramitando é
+     problema nosso; parado E arquivado é só histórico. */
+  const ativoParado = R.filter(r=>r.tramitacao==='Ativo' && r.movimentacao==='Estagnado').length;
+  const arqParado   = R.filter(r=>r.tramitacao==='Arquivado / baixado' && r.movimentacao==='Estagnado').length;
   const hoje       = new Date();
   const pub30      = R.filter(r=>{const d=dBR(r.dtPub);return d&&(hoje-d)/864e5<=30;}).length;
   const valores    = R.map(r=>r.valor).filter(v=>v>0).sort((a,b)=>a-b);
@@ -517,9 +598,14 @@ function kpis(){
 
   const K = [
     ['Processos na base', fmtN(R.length), semDados?fmtN(semDados)+' sem retorno das fontes':'todos com dados', 'var(--primary)', {}],
-    ['Ativos', fmtN(ativos), pct(ativos,R.length), 'var(--green)', {situacao:'Ativo'}],
-    ['Estagnados', fmtN(estag), 'sem movimento > 90 dias', 'var(--danger)', {situacao:'Estagnado'}],
-    ['Arquivados / baixados', fmtN(arq), pct(arq,R.length), 'var(--neutral)', {situacao:'Arquivado / baixado'}],
+    ['Ativos', fmtN(ativos), pct(ativos,R.length)+' · ainda tramitando', 'var(--green)', {tramitacao:'Ativo'}],
+    ['Arquivados / baixados', fmtN(arq), pct(arq,R.length), 'var(--neutral)', {tramitacao:'Arquivado / baixado'}],
+    ['Ativos e parados', fmtN(ativoParado),
+     'tramitando e sem movimento > '+DIAS_ESTAGNADO+' dias', 'var(--danger)',
+     {tramitacao:'Ativo', movimentacao:'Estagnado'}],
+    ['Arquivados e parados', fmtN(arqParado),
+     'parados porque acabaram — não exigem ação', 'var(--neutral)',
+     {tramitacao:'Arquivado / baixado', movimentacao:'Estagnado'}],
     ['Publicações em 30 dias', fmtN(pub30), 'processos com prazo em curso', 'var(--warning)', {pub30:true}],
     ['Ajuizados em 12 meses', fmtN(novos12m), 'entrada da carteira', 'var(--info)', {novos12m:true}],
     ['Valor da causa (mediana)', fmtM(mediana), fmtN(valores.length)+' com valor informado', 'var(--primary-mid)', {}],
@@ -537,7 +623,7 @@ function alertas(){
   const A = [
     ['pub7',   ROWS.filter(r=>{const d=dBR(r.dtPub);return d&&(hoje-d)/864e5<=7;}).length,
      'Publicações nos últimos 7 dias — prazos possivelmente em curso', 'var(--danger)'],
-    ['parado180', ROWS.filter(r=>r.dias!=null&&r.dias>180&&!/arquiv/i.test(r.situacao)).length,
+    ['parado180', ROWS.filter(r=>r.dias!=null&&r.dias>180&&r.tramitacao==='Ativo').length,
      'Parados há mais de 180 dias (fora arquivados)', 'var(--warning)'],
     ['semPub', ROWS.filter(r=>r.qtdPub===0&&r.qtdMov>0).length,
      'Com movimentação, mas sem nenhuma publicação no DJEN', 'var(--info)'],
@@ -643,64 +729,151 @@ function graficos(){
 /* ------------------------------ tabela ------------------------------- */
 const COLUNAS_TAB = [
   ['num','Nº do processo'],['tipo','Tipo'],['cliente','Cliente'],['tribunal','Trib.'],['grau','Inst.'],
-  ['vara','Vara / órgão'],['fase','Fase'],['situacao','Situação'],['dias','Dias parado'],
+  ['vara','Vara / órgão'],['fase','Fase'],['tramitacao','Tramitação'],['movimentacao','Movimento'],['dias','Dias parado'],
   ['qtdMov','Mov.'],['qtdPub','Pub.'],['dtPub','Últ. publicação'],
   ['sentenca','Sentença'],['recurso','Recurso'],['alvara','Alvará'],['ultMov','Última movimentação']
 ];
+/* =====================================================================
+   FILTROS DE SELEÇÃO MÚLTIPLA
+   Cada filtro guarda um Set em FILTRO[campo]. Os cartões de KPI continuam
+   podendo gravar uma string simples — selecionados() aceita as duas formas,
+   para que um clique de KPI não precise conhecer a estrutura interna.
+   ===================================================================== */
+const selecionados = campo => {
+  const v = FILTRO[campo];
+  if (v === undefined || v === null || v === '') return null;
+  if (v instanceof Set) return v.size ? v : null;
+  return new Set([String(v)]);
+};
+
+/* Valores de cada campo, com a contagem de processos — quem escolhe vê o
+   tamanho de cada fatia antes de marcar. */
+function valoresDe(campo){
+  const m = new Map();
+  for (const r of ROWS){
+    const vs = campo === 'grau' ? (r.graus.length ? r.graus : ['—'])
+             : campo === 'ano'  ? [String(anoDe(r) || '')]
+             : [String(r[campo] || '').trim()];
+    for (const v of vs){ if (!v) continue; m.set(v, (m.get(v) || 0) + 1); }
+  }
+  let lista = [...m.entries()];
+  if (campo === 'ano') lista.sort((a,b)=>Number(b[0])-Number(a[0]));
+  else if (campo === 'grau') {
+    const ordem = GRAUS.map(g=>g[0]);
+    lista.sort((a,b)=>{
+      const ia = ordem.indexOf(a[0]), ib = ordem.indexOf(b[0]);
+      if (ia >= 0 || ib >= 0) return (ia < 0 ? 99 : ia) - (ib < 0 ? 99 : ib);
+      return a[0].localeCompare(b[0], 'pt-BR');
+    });
+  }
+  else lista.sort((a,b)=>a[0].localeCompare(b[0],'pt-BR'));
+  return lista;
+}
+
+const rotuloValor = (campo, v) => campo === 'grau' ? (ROTULO_GRAU[v] || v) : v;
+
 function montarFiltros(){
-  const op = (sel, campo, rot) => {
-    const vals = [...new Set(ROWS.map(r=>String(r[campo]||'').trim()).filter(Boolean))].sort();
-    const atual = $(sel).value;
-    $(sel).innerHTML = '<option value="">'+rot+' (todos)</option>' + vals.map(v=>'<option>'+esc(v)+'</option>').join('');
-    if(atual) $(sel).value = atual;
-  };
-  op('#fTipo','tipo','Tipo'); op('#fFase','fase','Fase (DataJud)'); op('#fSituacao','situacao','Situação');
-  op('#fTribunal','tribunal','Tribunal');
+  document.querySelectorAll('.ms').forEach(caixa => {
+    const campo = caixa.dataset.campo, rot = caixa.dataset.rotulo;
+    if (!caixa.dataset.pronto){
+      caixa.innerHTML =
+        '<button type="button" class="ms-btn"><span class="ms-txt"></span>' +
+        '<span class="seta">&#9660;</span></button>' +
+        '<div class="ms-pop oculto">' +
+          '<input type="text" class="ms-busca" placeholder="filtrar opções…">' +
+          '<div class="ms-lista"></div>' +
+          '<div class="ms-acoes"><button type="button" data-acao="todos">Marcar todos</button>' +
+          '<button type="button" data-acao="nenhum">Limpar</button></div>' +
+        '</div>';
+      caixa.dataset.pronto = '1';
 
-  const presentes = new Set(); ROWS.forEach(r=>r.graus.forEach(g=>presentes.add(g)));
-  const listaGrau = GRAUS.filter(g=>presentes.has(g[0]))
-    .concat([...presentes].filter(g=>!ROTULO_GRAU[g]).sort().map(g=>[g,g]));
-  const atualG = $('#fGrau').value;
-  $('#fGrau').innerHTML = '<option value="">Instância (todas)</option>' +
-    listaGrau.map(g=>'<option value="'+esc(g[0])+'">'+esc(g[1])+'</option>').join('');
-  if(atualG) $('#fGrau').value = atualG;
-
-  const anos = [...new Set(ROWS.map(anoDe).filter(a=>a&&a>1990))].sort((a,b)=>b-a);
-  const atualA = $('#fAno').value;
-  $('#fAno').innerHTML = '<option value="">Ano de distribuição (todos)</option>' +
-    anos.map(a=>'<option value="'+a+'">'+a+'</option>').join('');
-  if(atualA) $('#fAno').value = atualA;
-  op('#fSentenca','sentenca','Sentença'); op('#fRecurso','recurso','Recurso');
-  op('#fAlvara','alvara','Alvará'); op('#fFaseCad','faseCad','Fase (cadastro)');
+      caixa.querySelector('.ms-btn').onclick = ev => {
+        ev.stopPropagation();
+        const pop = caixa.querySelector('.ms-pop'), abrindo = pop.classList.contains('oculto');
+        document.querySelectorAll('.ms-pop').forEach(x=>x.classList.add('oculto'));
+        if (abrindo){ pop.classList.remove('oculto'); caixa.querySelector('.ms-busca').focus(); }
+      };
+      caixa.querySelector('.ms-pop').onclick = ev => ev.stopPropagation();
+      caixa.querySelector('.ms-busca').oninput = () => pintarLista(caixa);
+      caixa.querySelectorAll('.ms-acoes button').forEach(b => {
+        b.onclick = () => {
+          const alvo = new Set();
+          if (b.dataset.acao === 'todos')
+            for (const [v] of valoresDe(campo)) if (visivelNaBusca(caixa, campo, v)) alvo.add(v);
+          FILTRO[campo] = alvo;
+          pintarLista(caixa); pintarBotao(caixa); tabela();
+        };
+      });
+    }
+    pintarLista(caixa); pintarBotao(caixa);
+  });
 }
+
+function visivelNaBusca(caixa, campo, v){
+  const q = nrm(caixa.querySelector('.ms-busca').value || '');
+  return !q || nrm(rotuloValor(campo, v)).indexOf(q) >= 0;
+}
+
+function pintarLista(caixa){
+  const campo = caixa.dataset.campo;
+  const sel = selecionados(campo) || new Set();
+  const itens = valoresDe(campo).filter(([v]) => visivelNaBusca(caixa, campo, v));
+  const lista = caixa.querySelector('.ms-lista');
+  lista.innerHTML = itens.length ? itens.map(([v, n]) =>
+    '<label class="ms-item"><input type="checkbox" value="' + esc(v) + '"' +
+    (sel.has(v) ? ' checked' : '') + '>' +
+    '<span title="' + esc(rotuloValor(campo, v)) + '">' + esc(rotuloValor(campo, v)) + '</span>' +
+    '<span class="qtd">' + fmtN(n) + '</span></label>').join('')
+    : '<div class="ms-vazio">Nenhuma opção corresponde à busca.</div>';
+
+  lista.querySelectorAll('input').forEach(cb => {
+    cb.onchange = () => {
+      const atual = selecionados(campo);
+      const novo = new Set(atual || []);
+      if (cb.checked) novo.add(cb.value); else novo.delete(cb.value);
+      FILTRO[campo] = novo;
+      pintarBotao(caixa); tabela();
+    };
+  });
+}
+
+function pintarBotao(caixa){
+  const campo = caixa.dataset.campo, rot = caixa.dataset.rotulo;
+  const sel = selecionados(campo);
+  const txt = caixa.querySelector('.ms-txt');
+  caixa.classList.toggle('ativo', !!sel);
+  if (!sel){ txt.textContent = rot + ' (todos)'; return; }
+  if (sel.size === 1){ txt.textContent = rot + ': ' + rotuloValor(campo, [...sel][0]); return; }
+  txt.innerHTML = esc(rot) + ' <span class="ms-conta">' + sel.size + '</span>';
+}
+
+/* Os KPIs gravam string; depois de um clique deles os botões precisam refletir
+   a escolha. É o que esta função faz — o antigo sincronizarSelects. */
 function sincronizarSelects(){
-  $('#fTipo').value = FILTRO.tipo||''; $('#fFase').value = FILTRO.fase||'';
-  $('#fSituacao').value = FILTRO.situacao||''; $('#fTribunal').value = FILTRO.tribunal||'';
-  $('#fGrau').value = FILTRO.grau||'';
-  $('#fSentenca').value = FILTRO.sentenca||''; $('#fRecurso').value = FILTRO.recurso||'';
-  $('#fAlvara').value = FILTRO.alvara||''; $('#fFaseCad').value = FILTRO.faseCad||'';
-  $('#fAno').value = FILTRO.ano||'';
-  if(FILTRO.busca===undefined) $('#fBusca').value = '';
+  document.querySelectorAll('.ms').forEach(c => { pintarLista(c); pintarBotao(c); });
+  if (FILTRO.busca === undefined) { $('#fBusca').value = ''; $('#btnLimparBusca').classList.add('oculto'); }
 }
+document.addEventListener('click', () =>
+  document.querySelectorAll('.ms-pop').forEach(x => x.classList.add('oculto')));
+
 function filtrar(){
   const hoje = new Date();
   return ROWS.filter(r=>{
-    if(FILTRO.tipo && r.tipo!==FILTRO.tipo) return false;
-    if(FILTRO.fase && r.fase!==FILTRO.fase) return false;
-    if(FILTRO.situacao && r.situacao!==FILTRO.situacao) return false;
-    if(FILTRO.tribunal && r.tribunal!==FILTRO.tribunal) return false;
-    if(FILTRO.grau && r.graus.indexOf(FILTRO.grau)<0) return false;
-    if(FILTRO.ano && String(anoDe(r))!==String(FILTRO.ano)) return false;
-    if(FILTRO.sentenca && r.sentenca!==FILTRO.sentenca) return false;
-    if(FILTRO.recurso && r.recurso!==FILTRO.recurso) return false;
-    if(FILTRO.alvara && r.alvara!==FILTRO.alvara) return false;
-    if(FILTRO.faseCad && r.faseCad!==FILTRO.faseCad) return false;
+    for (const campo of ['tipo','fase','situacao','tribunal','sentenca','recurso',
+                         'alvara','faseCad','tramitacao','movimentacao']){
+      const sel = selecionados(campo);
+      if (sel && !sel.has(String(r[campo]||''))) return false;
+    }
+    const selGrau = selecionados('grau');
+    if (selGrau && !r.graus.some(g=>selGrau.has(g))) return false;
+    const selAno = selecionados('ano');
+    if (selAno && !selAno.has(String(anoDe(r)||''))) return false;
     if(FILTRO.meritoJulgado && !/^(proced|improced)/.test(nrm(r.sentenca))) return false;
     if(FILTRO.alvaraAReceber && !/solicitado|aguardando/i.test(r.alvara)) return false;
     if(FILTRO.pub30){ const d=dBR(r.dtPub); if(!(d&&(hoje-d)/864e5<=30)) return false; }
     if(FILTRO.novos12m){ const d=dBR(r.ajuizamento); if(!(d&&(hoje-d)/864e5<=365)) return false; }
     if(FILTRO.alerta==='pub7'){ const d=dBR(r.dtPub); if(!(d&&(hoje-d)/864e5<=7)) return false; }
-    if(FILTRO.alerta==='parado180' && !(r.dias!=null&&r.dias>180&&!/arquiv/i.test(r.situacao))) return false;
+    if(FILTRO.alerta==='parado180' && !(r.dias!=null&&r.dias>180&&r.tramitacao==='Ativo')) return false;
     if(FILTRO.alerta==='semPub' && !(r.qtdPub===0&&r.qtdMov>0)) return false;
     if(FILTRO.alerta==='semFonte' && !/sem dados/i.test(r.situacao)) return false;
     if(FILTRO.alerta==='cumprimento' && !/cumprimento/i.test(r.tipo)) return false;
@@ -708,7 +881,15 @@ function filtrar(){
     if(FILTRO.busca){
       const q = nrm(FILTRO.busca);
       const alvo = nrm([r.num,r.partes,r.cliente,r.assunto,r.vara,r.orgao,r.classe,r.ultMov,r.ultPub,r.tribunal].join(' '));
-      if(alvo.indexOf(q)<0 && String(r.num).replace(/\D/g,'').indexOf(q.replace(/\D/g,''))<0) return false;
+      /* O casamento por número só vale quando a busca TEM dígitos. Sem essa
+         guarda, uma busca por nome vira q.replace(/\D/g,'') === '' e
+         ''.indexOf('') devolve 0 — o que fazia toda linha passar e a busca
+         por texto parecer não funcionar. */
+      const qNum = q.replace(/\D/g,'');
+      const achouTexto = alvo.indexOf(q) >= 0;
+      const achouNumero = qNum.length >= 3 &&
+        String(r.num).replace(/\D/g,'').indexOf(qNum) >= 0;
+      if(!achouTexto && !achouNumero) return false;
     }
     return true;
   });
@@ -733,7 +914,8 @@ function tabela(){
     '<td style="white-space:nowrap">'+esc(r.graus.join(' › ')||'—')+'</td>'+
     '<td><span class="trunc" style="max-width:190px">'+esc(r.vara||r.orgao||'—')+'</span></td>'+
     '<td>'+esc(r.fase)+'</td>'+
-    '<td>'+chipSit(r.situacao)+'</td>'+
+    '<td>'+chipSit(r.tramitacao)+'</td>'+
+    '<td>'+chipSit(r.movimentacao)+'</td>'+
     '<td class="mono">'+(r.dias==null?'—':fmtN(r.dias))+'</td>'+
     '<td class="mono">'+fmtN(r.qtdMov)+'</td>'+
     '<td class="mono">'+fmtN(r.qtdPub)+'</td>'+
@@ -760,9 +942,14 @@ function chipSent(t){
           : k.indexOf('extin')>=0     ? 'var(--neutral)' : 'var(--text-muted)';
   return '<span class="chip" style="color:'+c+';background:rgba(255,255,255,.05)">'+esc(t)+'</span>';
 }
+/* Serve às duas dimensões: verde para o que está vivo e andando, vermelho
+   para o que parou, cinza para o que já se encerrou. */
 function chipSit(s){
-  const c = s==='Ativo'?'var(--green)':s==='Estagnado'?'var(--danger)':/arquiv/i.test(s)?'var(--neutral)':'var(--text-muted)';
-  const bg= s==='Ativo'?'var(--green-light)':s==='Estagnado'?'var(--danger-light)':'var(--neutral-light)';
+  const bom = s==='Ativo' || s==='Em movimento';
+  const ruim = s==='Estagnado';
+  const c  = bom ? 'var(--green)' : ruim ? 'var(--danger)'
+           : /arquiv|baixa/i.test(s) ? 'var(--neutral)' : 'var(--text-muted)';
+  const bg = bom ? 'var(--green-light)' : ruim ? 'var(--danger-light)' : 'var(--neutral-light)';
   return '<span class="chip" style="color:'+c+';background:'+bg+'">'+esc(s)+'</span>';
 }
 
@@ -786,7 +973,9 @@ async function abrirDetalhe(linha){
     ln('Órgão julgador', r.orgao) + ln('Classe', r.classe) + ln('Assunto', r.assunto) +
     ln('Ajuizamento', r.ajuizamento) + ln('Sistema / formato', [r.sistema,r.formato].filter(Boolean).join(' · ')) +
     ln('Nível de sigilo', String(r.sigilo)) +
-    ln('Fase (DataJud)', r.fase) + ln('Fase (cadastro)', r.faseCad) + ln('Situação', r.situacao) +
+    ln('Fase (DataJud)', r.fase) + ln('Fase (cadastro)', r.faseCad) +
+    ln('Tramitação', r.tramitacao) + ln('Movimentação', r.movimentacao) +
+    ln('Situação (original da planilha)', r.situacao) +
     ln('Resultado da sentença', r.sentenca) + ln('Resultado do recurso', r.recurso) +
     ln('Situação do alvará', r.alvara) +
     ln('Dias sem movimentação', r.dias==null?'—':fmtN(r.dias)) +
@@ -1106,31 +1295,73 @@ $('#btnCfg').onclick = () => abrirConfig();
 $('#btnFechar').onclick = fechar;
 $('#ov').onclick = fechar;
 document.addEventListener('keydown', e=>{ if(e.key==='Escape') fechar(); });
-$('#fBusca').oninput = e => { FILTRO.busca = e.target.value; tabela(); };
-const MAPA_FILTRO = { fTipo:'tipo', fFase:'fase', fSituacao:'situacao', fTribunal:'tribunal', fGrau:'grau',
-                      fSentenca:'sentenca', fRecurso:'recurso', fAlvara:'alvara', fFaseCad:'faseCad',
-                      fAno:'ano' };
-Object.keys(MAPA_FILTRO).forEach(id=>{
-  $('#'+id).onchange = e => {
-    delete FILTRO.alerta; delete FILTRO.pub30; delete FILTRO.novos12m;
-    if(e.target.value) FILTRO[MAPA_FILTRO[id]] = e.target.value; else delete FILTRO[MAPA_FILTRO[id]];
-    tabela();
-  };
-});
-$('#btnLimpar').onclick = () => { FILTRO={}; $('#fBusca').value=''; sincronizarSelects(); tabela(); };
-$('#btnCSV').onclick = () => {
+/* A busca continua filtrando enquanto se digita — o botão existe porque nem
+   todo mundo descobre isso, e o Enter agora também confirma. */
+function aplicarBusca(){
+  FILTRO.busca = $('#fBusca').value;
+  $('#btnLimparBusca').classList.toggle('oculto', !FILTRO.busca);
+  tabela();
+}
+$('#fBusca').oninput = aplicarBusca;
+$('#fBusca').onkeydown = e => { if (e.key === 'Enter') { e.preventDefault(); aplicarBusca(); } };
+$('#btnBuscar').onclick = () => { aplicarBusca(); $('#fBusca').focus(); };
+$('#btnLimparBusca').onclick = () => { $('#fBusca').value = ''; aplicarBusca(); $('#fBusca').focus(); };
+$('#btnLimpar').onclick = () => { FILTRO={}; $('#fBusca').value='';
+  $('#btnLimparBusca').classList.add('oculto'); sincronizarSelects(); tabela(); };
+/* As duas exportações partem da mesma matriz, para que o CSV e o Excel nunca
+   divirjam em coluna nem em ordem. Tramitação e movimentação entram como
+   colunas próprias, ao lado da situação original da planilha. */
+function matrizExport(){
   const L = filtrar();
   const cab = ['Numero','Tipo','Cliente','Partes','Tribunal','Grau','Vara','Classe','Assunto','Ajuizamento',
-               'Fase (DataJud)','Fase (cadastro)','Situacao','Resultado da sentenca','Resultado do recurso',
+               'Fase (DataJud)','Fase (cadastro)','Tramitacao','Movimentacao','Estado (cruzamento)',
+               'Situacao (original)','Resultado da sentenca','Resultado do recurso',
                'Situacao do alvara','Dias sem movimentacao','Movimentos','Publicacoes','Ultima movimentacao',
                'Data ultima movimentacao','Data ultima publicacao','Valor da causa'];
   const linhas = L.map(r=>[r.num,r.tipo,r.cliente,r.partes,r.tribunal,r.grau,r.vara,r.classe,r.assunto,
-    r.ajuizamento,r.fase,r.faseCad,r.situacao,r.sentenca,r.recurso,r.alvara,
-    r.dias,r.qtdMov,r.qtdPub,r.ultMov,r.dtMov,r.dtPub,r.valor]);
-  const csv = [cab].concat(linhas).map(l=>l.map(c=>'"'+String(c==null?'':c).replace(/"/g,'""')+'"').join(';')).join('\n');
+    r.ajuizamento,r.fase,r.faseCad,r.tramitacao,r.movimentacao,r.estado,r.situacao,r.sentenca,r.recurso,
+    r.alvara,r.dias,r.qtdMov,r.qtdPub,r.ultMov,r.dtMov,r.dtPub,r.valor]);
+  return { cab, linhas };
+}
+
+const nomeArquivo = ext =>
+  'processos-datajud-' + new Date().toISOString().slice(0,10) + '.' + ext;
+
+function baixar(blob, nome){
   const a = document.createElement('a');
-  a.href = URL.createObjectURL(new Blob(['﻿'+csv],{type:'text/csv;charset=utf-8'}));
-  a.download = 'processos-datajud-djen.csv'; a.click();
+  a.href = URL.createObjectURL(blob); a.download = nome; a.click();
+  setTimeout(()=>URL.revokeObjectURL(a.href), 4000);
+}
+
+$('#btnCSV').onclick = () => {
+  const { cab, linhas } = matrizExport();
+  const csv = [cab].concat(linhas)
+    .map(l=>l.map(c=>'"'+String(c==null?'':c).replace(/"/g,'""')+'"').join(';')).join('\n');
+  /* BOM para o Excel abrir os acentos direito ao dar duplo clique no CSV. */
+  baixar(new Blob(['﻿'+csv],{type:'text/csv;charset=utf-8'}), nomeArquivo('csv'));
+};
+
+$('#btnXLSX').onclick = () => {
+  if (typeof XLSX === 'undefined'){
+    alert('A biblioteca de Excel não carregou. Verifique a conexão e recarregue a página.');
+    return;
+  }
+  const { cab, linhas } = matrizExport();
+  /* Dias, movimentos, publicações e valor vão como número, não como texto —
+     senão o Excel não soma nem ordena. */
+  const numericas = new Set([19,20,21,25]);
+  const dados = linhas.map(l => l.map((c,i) => {
+    if (c == null || c === '') return '';
+    if (numericas.has(i)){ const n = Number(c); return isFinite(n) ? n : c; }
+    return c;
+  }));
+  const ws = XLSX.utils.aoa_to_sheet([cab].concat(dados));
+  ws['!cols'] = cab.map((c,i) => ({ wch: i===3 ? 46 : i===8 ? 34 : Math.max(12, Math.min(30, c.length + 4)) }));
+  ws['!autofilter'] = { ref: XLSX.utils.encode_range({ s:{r:0,c:0}, e:{r:dados.length, c:cab.length-1} }) };
+  ws['!freeze'] = { xSplit: 0, ySplit: 1 };
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, 'Processos');
+  XLSX.writeFile(wb, nomeArquivo('xlsx'));
 };
 $('#btnPerg').onclick = () => perguntar($('#iaInput').value);
 $('#iaInput').onkeydown = e => { if(e.key==='Enter' && (e.ctrlKey||e.metaKey)) perguntar($('#iaInput').value); };
