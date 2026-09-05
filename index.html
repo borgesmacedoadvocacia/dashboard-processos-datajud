@@ -49,6 +49,10 @@
         ? 'A sessão atual não tem permissão para este painel. Ele é restrito a Administração e Lideranças.'
         : 'Este painel abre pela Central de Dashboards, que confirma o acesso antes de carregar os dados.');
 
+  /* Marca o bloqueio para o app não seguir carregando por trás da tela de
+     aviso: sem isto a página continua buscando a planilha e renderizando em
+     elementos que já não existem. */
+  window.__bmBloqueado = true;
   var pintar = function () {
     document.title = 'Acesso pela central | Borges Macedo';
     document.body.innerHTML =
@@ -340,6 +344,7 @@
       <div class="ms" data-campo="tramitacao" data-rotulo="Status do processo"></div>
       <div class="ms" data-campo="movimentacao" data-rotulo="Status de movimentação"></div>
       <div class="ms" data-campo="tipo" data-rotulo="Tipo"></div>
+      <div class="ms" data-campo="produto" data-rotulo="Produto jurídico"></div>
       <div class="ms" data-campo="fase" data-rotulo="Fase (DataJud)"></div>
       <div class="ms" data-campo="tribunal" data-rotulo="Tribunal"></div>
       <div class="ms" data-campo="grau" data-rotulo="Instância"></div>
@@ -443,7 +448,57 @@ async function sheets(ranges){
   return (await res.json()).valueRanges || [];
 }
 
+/* ---------------------------------------------------------------------
+   Nome das partes e produto jurídico vêm da planilha "Clientes e Processos",
+   onde o produto é CADASTRADO à mão — aqui ele não existe. Desta base lê-se
+   apenas AUTOR, RÉU, PRODUTO JURÍDICO e PARTE REPRESENTADA: as demais colunas
+   não são importadas. Se a leitura falhar, o painel segue sem esses campos.
+   ------------------------------------------------------------------ */
+const SHEET_CLIENTES = '1XKMeYEapBqBq_IIaLu2uN-ceB3btArIYmrPBuyxsLHU';
+const ABA_CLIENTES = 'Todos os Processos';
+let CLIENTES = new Map();
+
+async function carregarClientes(){
+  try{
+    const url = 'https://sheets.googleapis.com/v4/spreadsheets/'+SHEET_CLIENTES+
+      '/values/'+encodeURIComponent("'"+ABA_CLIENTES+"'")+
+      '?valueRenderOption=FORMATTED_VALUE&key='+API_KEY;
+    const r = await fetch(url);
+    if(!r.ok) return;
+    const grid = (await r.json()).values || [];
+    if(!grid.length) return;
+    /* Resolução por cabeçalho: a planilha é editada à mão e a ordem já mudou. */
+    const nrm = h => String(h==null?'':h).replace(/\s+/g,' ').trim().toUpperCase();
+    const ci = {};
+    grid[0].forEach((h,i)=>{ const k=nrm(h); if(k && ci[k]===undefined) ci[k]=i; });
+    const ix = r2 => { const i=ci[nrm(r2)]; return i===undefined?-1:i; };
+    const iNum=ix('Nº DO PROCESSO'), iAut=ix('AUTOR'), iReu=ix('RÉU'),
+          iProd=ix('PRODUTO JURÍDICO'), iParte=ix('PARTE REPRESENTADA');
+    if(iNum<0) return;
+    const m = new Map();
+    for(const linha of grid.slice(1)){
+      const g = i => (i>=0 && linha[i]!=null ? String(linha[i]).trim() : '');
+      const dig = g(iNum).replace(/\D/g,'');
+      if(!dig || m.has(dig)) continue;
+      m.set(dig, { autor:g(iAut), reu:g(iReu), produto:g(iProd), polo:g(iParte) });
+    }
+    CLIENTES = m;
+  }catch(e){ /* sem esta base o painel funciona, só não mostra partes nem produto */ }
+}
+
+/* Aplica o enriquecimento sobre ROWS já montado. */
+function aplicarClientes(){
+  for(const r of ROWS){
+    const c = CLIENTES.get(String(r.num||'').replace(/\D/g,''));
+    r.autor   = c ? c.autor   : '';
+    r.reu     = c ? c.reu     : '';
+    r.produto = c && c.produto ? c.produto : '—';
+    r.polo    = c ? c.polo     : '';
+  }
+}
+
 async function carregar(){
+  if (window.__bmBloqueado) return;   // acesso barrado pelo guarda
   let vr;
   try{
     vr = await sheets(["'"+ABA+"'!A2:M", "'"+ABA+"'!P2:AH", "'"+ABA_SYNC+"'!A1:B11"]);
@@ -458,6 +513,7 @@ async function carregar(){
     }
   }
   const A = vr[0].values||[], B = vr[1].values||[], S = vr[2].values||[];
+  await carregarClientes();
 
   SYNC = {}; S.forEach(l=>{ if(l && l[0]) SYNC[String(l[0])] = l[1]; });
 
@@ -511,6 +567,7 @@ async function carregar(){
     derivarEstado(u);
     u.tipo = classificarTipoCNJ(u);
   }
+  aplicarClientes();
   render();
   /* Só depois de a tela existir: o painel abre rápido e se corrige sozinho
      quando o histórico de andamentos terminar de chegar. */
@@ -871,7 +928,8 @@ function graficos(){
 
 /* ------------------------------ tabela ------------------------------- */
 const COLUNAS_TAB = [
-  ['num','Nº do processo'],['tipo','Tipo'],['cliente','Cliente'],['tribunal','Trib.'],['grau','Inst.'],
+  ['num','Nº do processo'],['tipo','Tipo'],['cliente','Cliente'],
+  ['produto','Produto jurídico'],['reu','Réu'],['tribunal','Trib.'],['grau','Inst.'],
   ['vara','Vara / órgão'],['fase','Fase'],['tramitacao','Status do processo'],['movimentacao','Movimentação'],['dias','Dias parado'],
   ['qtdMov','Mov.'],['qtdPub','Pub.'],['dtPub','Últ. publicação'],
   ['sentenca','Sentença'],['recurso','Recurso'],['alvara','Alvará'],['ultMov','Última movimentação']
@@ -1023,7 +1081,8 @@ function filtrar(){
     if(FILTRO.alerta==='recursos' && !/apelacao|agravo/i.test(nrm(r.tipo))) return false;
     if(FILTRO.busca){
       const q = nrm(FILTRO.busca);
-      const alvo = nrm([r.num,r.partes,r.cliente,r.assunto,r.vara,r.orgao,r.classe,r.ultMov,r.ultPub,r.tribunal].join(' '));
+      const alvo = nrm([r.num,r.partes,r.cliente,r.autor,r.reu,r.produto,r.assunto,
+                        r.vara,r.orgao,r.classe,r.ultMov,r.ultPub,r.tribunal].join(' '));
       /* O casamento por número só vale quando a busca TEM dígitos. Sem essa
          guarda, uma busca por nome vira q.replace(/\D/g,'') === '' e
          ''.indexOf('') devolve 0 — o que fazia toda linha passar e a busca
@@ -1469,12 +1528,12 @@ $('#btnLimpar').onclick = () => { FILTRO={}; $('#fBusca').value='';
    colunas próprias, ao lado da situação original da planilha. */
 function matrizExport(){
   const L = filtrar();
-  const cab = ['Numero','Tipo','Cliente','Partes','Tribunal','Grau','Vara','Classe','Assunto','Ajuizamento',
+  const cab = ['Numero','Tipo','Cliente','Produto juridico','Autor','Reu','Partes','Tribunal','Grau','Vara','Classe','Assunto','Ajuizamento',
                'Fase (DataJud)','Fase (cadastro)','Status do Processo','Status de Movimentacao','Estado (cruzamento)',
                'Situacao (original)','Resultado da sentenca','Resultado do recurso',
                'Situacao do alvara','Dias sem movimentacao','Movimentos','Publicacoes','Ultima movimentacao',
                'Data ultima movimentacao','Data ultima publicacao','Valor da causa'];
-  const linhas = L.map(r=>[r.num,r.tipo,r.cliente,r.partes,r.tribunal,r.grau,r.vara,r.classe,r.assunto,
+  const linhas = L.map(r=>[r.num,r.tipo,r.cliente,r.produto,r.autor,r.reu,r.partes,r.tribunal,r.grau,r.vara,r.classe,r.assunto,
     r.ajuizamento,r.fase,r.faseCad,r.tramitacao,r.movimentacao,r.estado,r.situacao,r.sentenca,r.recurso,
     r.alvara,r.dias,r.qtdMov,r.qtdPub,r.ultMov,r.dtMov,r.dtPub,r.valor]);
   return { cab, linhas };
