@@ -475,6 +475,7 @@ async function carregar(){
        mexer na origem: a situação original continua exposta como está. */
     const u = ROWS[ROWS.length-1];
     derivarEstado(u);
+    u.tipo = classificarTipoCNJ(u);
   }
   render();
   /* Só depois de a tela existir: o painel abre rápido e se corrige sozinho
@@ -508,6 +509,48 @@ const MOV_DESARQUIVA= /^desarquiv/i;
 const MOV_PAPELADA  = /^(publica|expedi|documento|disponibiliza|ato ordinat|decurso de prazo|comunica|certid|juntada|remessa|recebimento|confirmad|mero expediente)/i;
 
 /* Cada linha do histórico vem como "[G1] 05/08/2026 - Nome (complementos)". */
+/* Numeração unificada do CNJ: NNNNNNN-DD.AAAA.J.TR.OOOO
+   Os quatro últimos dígitos são a UNIDADE DE ORIGEM. Quando valem 0000, o
+   feito nasceu no próprio tribunal (competência originária de 2º grau);
+   TJBA, TJPE e TJRJ usam 9000 para os órgãos de 2º grau dos juizados. Nos
+   dois casos não é processo principal de 1º grau. */
+function origemOriginaria(numero){
+  const m = String(numero || '').match(/(\d{4})\s*$/);
+  return !!m && (m[1] === '0000' || m[1] === '9000');
+}
+
+/* Mesma regra que o Apps Script grava na planilha, repetida aqui para valer
+   desde já — sem ela a correção só apareceria depois de reimplantar o
+   script. A classe manda; quando ela não identifica nada, a origem ainda
+   diz que o feito não é principal. */
+const REGRAS_CLASSE = [
+  [/mandado de seguranca/,    'Mandado de Segurança'],
+  [/conflito de competencia/, 'Conflito de Competência'],
+  [/agravo interno/,          'Agravo Interno'],
+  [/embargos de declaracao/,  'Embargos de Declaração'],
+  [/agravo de instrumento/,   'Agravo de Instrumento'],
+  [/recurso inominado/,       'Recurso Inominado'],
+  [/apelacao/,                'Recurso de Apelação'],
+  [/cumprimento de sentenca|cumprimento provisorio|cumprimento de decisao/, 'Cumprimento de Sentença']
+];
+
+function classificarTipoCNJ(r){
+  /* A classe vem como "G1: Cumprimento de sentença | G2: Apelação Cível" —
+     um trecho por grau, do mais recentemente atualizado para o mais antigo.
+     Avaliar a string inteira faria "apelação" vencer "cumprimento" em todo
+     processo que tenha os dois, o que joga centenas de execuções para a
+     categoria errada. A leitura é trecho a trecho, na ordem em que vêm. */
+  for (const trecho of String(r.classe || '').split('|')) {
+    const c = nrm(trecho);
+    if (!c) continue;
+    for (const [re, nome] of REGRAS_CLASSE) if (re.test(c)) return nome;
+  }
+  if (origemOriginaria(r.num)) return 'Originário de tribunal';
+  /* Sem classe e sem origem originária, fica o que a planilha trouxer:
+     inventar "Processo Principal" aqui seria afirmar o que não se sabe. */
+  return r.tipo || '—';
+}
+
 function derivarEstado(r){
   /* Duas dimensões independentes, e a planilha agora grava as duas:
        AG "Status do Processo"      — Ativo, Arquivado provisoriamente,

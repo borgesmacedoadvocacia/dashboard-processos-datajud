@@ -227,6 +227,7 @@ function classificarTipo_(regs) {
     if (/agravo interno/.test(c))        return 'Agravo Interno';
     if (/embargos de declaracao/.test(c)) return 'Embargos de Declaração';
     if (/agravo de instrumento/.test(c)) return 'Agravo de Instrumento';
+    if (/recurso inominado/.test(c))     return 'Recurso Inominado';
     if (/apelacao/.test(c))              return 'Recurso de Apelação';
     if (/cumprimento de sentenca|cumprimento provisorio|cumprimento de decisao/.test(c)) {
       return 'Cumprimento de Sentença';
