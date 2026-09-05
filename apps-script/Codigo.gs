@@ -82,6 +82,7 @@ function onOpen() {
     .addItem('Sincronizar incremental', 'sincronizarIncrementalMenu')
     .addSeparator()
     .addItem('Importar processos da planilha-mae', 'importarDaPlanilhaMae')
+    .addItem('Incluir processos por numero (colar lista)', 'incluirProcessosPorNumero')
     .addItem('Aplicar OABs padrao no _Config', 'aplicarOABsPadrao')
     .addItem('Configurar tudo (1a vez)', 'configurarTudo')
     .addItem('Recriar gatilho das 6h', 'criarGatilhoDiario')
@@ -152,6 +153,95 @@ function importarDaPlanilhaMae() {
       'Rode "Sincronizar agora (completa)" para buscar os dados deles no DataJud e no DJEN.'
     ].join('\n'));
   } catch (e) {}
+}
+
+/**
+ * Inclui na Base geral processos informados por numero.
+ *
+ * A semeadura normal so olha para a propria Base geral e para a planilha-mae
+ * "Clientes e Processos". Um processo que saiu no diario e nao esta em nenhuma
+ * das duas nunca entra sozinho - e o painel Publicacoes DJEN chama esses de
+ * publicacoes orfas. Este item fecha essa lacuna: cola-se a lista de numeros
+ * (um por linha, com ou sem mascara) e eles passam a existir na base; a
+ * sincronizacao seguinte busca os dados de cada um no DataJud e no DJEN.
+ *
+ * Nao sobrescreve nada: numero ja existente e ignorado.
+ */
+function incluirProcessosPorNumero() {
+  var ui = SpreadsheetApp.getUi();
+  var resp = ui.prompt(
+    'Incluir processos na Base geral',
+    'Cole os numeros dos processos, um por linha (com ou sem mascara).\n' +
+    'Os que ja existirem serao ignorados.',
+    ui.ButtonSet.OK_CANCEL);
+  if (resp.getSelectedButton() !== ui.Button.OK) return;
+
+  var brutos = String(resp.getResponseText() || '').split(/[\r\n,;]+/);
+  var novos = [], vistos = {};
+  for (var i = 0; i < brutos.length; i++) {
+    var d = soDigitos_(brutos[i]);
+    if (d.length !== 20 || vistos[d]) continue;
+    vistos[d] = 1;
+    novos.push(d);
+  }
+  if (!novos.length) {
+    ui.alert('Nenhum numero valido. O numero do CNJ tem 20 digitos.');
+    return;
+  }
+
+  var ss = planilha_();
+  garantirConfig_(ss); garantirSync_(ss); garantirDJEN_(ss); garantirCabecalho_(ss);
+  var aba = ss.getSheetByName(cfg_('ABA_BASE'));
+
+  /* Ja existentes na base — comparacao por digitos, porque a mascara varia. */
+  var existentes = {};
+  var ult = aba.getLastRow();
+  if (ult > 1) {
+    var nums = aba.getRange(2, 2, ult - 1, 1).getValues();
+    for (var j = 0; j < nums.length; j++) {
+      var n = soDigitos_(nums[j][0]);
+      if (n) existentes[n] = 1;
+    }
+  }
+
+  var incluir = [];
+  for (var k = 0; k < novos.length; k++) {
+    if (!existentes[novos[k]]) incluir.push(novos[k]);
+  }
+  if (!incluir.length) {
+    ui.alert('Todos os ' + novos.length + ' processos informados ja estao na Base geral.');
+    return;
+  }
+
+  /* Grava so o numero, com mascara: as demais colunas sao preenchidas pela
+     sincronizacao, que e quem fala com o DataJud. */
+  var linhas = incluir.map(function (d) {
+    var linha = new Array(N_COLUNAS);
+    for (var c = 0; c < N_COLUNAS; c++) linha[c] = '';
+    linha[1] = mascaraCNJ_(d);
+    linha[27] = 'Incluido manualmente';   // AB — Origem do Cadastro
+    return linha;
+  });
+  aba.getRange(aba.getLastRow() + 1, 1, linhas.length, N_COLUNAS).setValues(linhas);
+
+  gravarSync_({ status: 'ocioso', etapa: 'inclusao',
+    mensagem: 'Incluidos ' + linhas.length + ' processos por numero.' });
+
+  ui.alert([
+    incluir.length + ' processo(s) incluido(s) na Base geral.',
+    (novos.length - incluir.length) + ' ja existiam e foram ignorados.',
+    '',
+    'Rode "Sincronizar agora (completa)" para buscar os dados deles',
+    'no DataJud e no DJEN.'
+  ].join('\n'));
+}
+
+/** Aplica a mascara do CNJ a 20 digitos: NNNNNNN-DD.AAAA.J.TR.OOOO */
+function mascaraCNJ_(d) {
+  d = soDigitos_(d);
+  if (d.length !== 20) return d;
+  return d.slice(0, 7) + '-' + d.slice(7, 9) + '.' + d.slice(9, 13) + '.' +
+         d.slice(13, 14) + '.' + d.slice(14, 16) + '.' + d.slice(16, 20);
 }
 
 function cancelarSincronizacao() {
