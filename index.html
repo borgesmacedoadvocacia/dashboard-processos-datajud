@@ -3,36 +3,70 @@
 <head>
 <meta charset="UTF-8" />
 <script>
-/* Central BM — o acesso a este dashboard é pela central única.
-   Acesso direto é remanejado para a central. Dentro dela, além da sessão
-   ativa, o PERFIL precisa estar autorizado: só Administração e Lideranças.
-   A Equipe, mesmo logada na central, é remanejada de volta. */
+/* Central BM — diferente dos demais painéis, este não tem cofre próprio: o
+   controle de acesso é só este trecho, então ele continua barrando quem não
+   veio da central com perfil de Administração ou Lideranças.
+
+   O que mudou é o modo de barrar. Antes era location.replace(PORTAL), e isso
+   quebrava o uso em iPad e celular: aba nova e favorito caíam na central, e o
+   Safari não copia o sessionStorage para a aba nova; com "Bloquear todos os
+   cookies" ligado, ler o storage lança exceção e o retorno à central caía no
+   mesmo problema — laço infinito de login. Agora a página explica o que houve
+   e oferece o link, que funciona igual em qualquer navegador. */
 (function () {
-  var PORTAL  = 'https://borgesmacedoadvocacia.github.io/';
-  var PERFIS  = ['administracao', 'liderancas'];
-  if (location.protocol === 'file:' || location.hostname === 'localhost' || location.hostname === '127.0.0.1') return;
-  function ir() { try { window.top.location.replace(PORTAL); } catch (e) { location.replace(PORTAL); } }
-  if (window.self === window.top) { ir(); return; }
-  var ok = false, perfil = '', noMenu = false;
+  var PORTAL = 'https://borgesmacedoadvocacia.github.io/';
+  var PERFIS = ['administracao', 'liderancas'];
+  if (location.protocol === 'file:' ||
+      location.hostname === 'localhost' || location.hostname === '127.0.0.1') return;
+
+  var storageOk = true, autenticado = false, perfil = '', noMenu = false;
   try {
-    ok = sessionStorage.getItem('bm_portal_auth') === '1';
-    var s = JSON.parse(sessionStorage.getItem('bm_portal_sessao') || 'null');
-    perfil = (s && s.perfil) ? String(s.perfil) : '';
+    autenticado = sessionStorage.getItem('bm_portal_auth') === '1';
+    var ses = JSON.parse(sessionStorage.getItem('bm_portal_sessao') || 'null');
+    perfil = (ses && ses.perfil) ? String(ses.perfil) : '';
     /* fonte de verdade: este painel está no menu que o perfil recebeu? */
-    if (s && s.grupos) {
-      for (var g = 0; g < s.grupos.length && !noMenu; g++) {
-        var itens = s.grupos[g].itens || [];
+    if (ses && ses.grupos) {
+      for (var g = 0; g < ses.grupos.length && !noMenu; g++) {
+        var itens = ses.grupos[g].itens || [];
         for (var i = 0; i < itens.length; i++) {
           if (itens[i] && itens[i].id === 'processos-datajud') { noMenu = true; break; }
         }
       }
     }
-  } catch (e) {}
+  } catch (e) { storageOk = false; }
+
   var norm = function (t) {
-    return String(t).trim().toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '');
+    return String(t).trim().toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
   };
-  if (!ok || !(noMenu || PERFIS.indexOf(norm(perfil)) >= 0)) { ir(); return; }
-  document.documentElement.setAttribute('data-portal', '1');
+  var liberado = autenticado && (noMenu || PERFIS.indexOf(norm(perfil)) >= 0);
+  if (liberado) { document.documentElement.setAttribute('data-portal', '1'); return; }
+
+  var motivo = !storageOk
+    ? 'Este navegador está com o armazenamento do site bloqueado, então não há como ' +
+      'confirmar a sessão. No Safari, em Ajustes &rsaquo; Safari, desligue "Bloquear todos os cookies" ' +
+      'e saia da Navegação Privada.'
+    : (autenticado
+        ? 'A sessão atual não tem permissão para este painel. Ele é restrito a Administração e Lideranças.'
+        : 'Este painel abre pela Central de Dashboards, que confirma o acesso antes de carregar os dados.');
+
+  var pintar = function () {
+    document.title = 'Acesso pela central | Borges Macedo';
+    document.body.innerHTML =
+      '<div style="min-height:100vh;display:flex;align-items:center;justify-content:center;' +
+      'padding:1.5rem;background:#0b0f19;color:#e2e8f0;' +
+      "font-family:'Segoe UI',system-ui,-apple-system,sans-serif\">" +
+      '<div style="max-width:420px;width:100%;background:#161b26;border:1px solid #232b3b;' +
+      'border-radius:16px;padding:2rem 1.75rem;text-align:center;box-shadow:0 18px 60px rgba(0,0,0,.55)">' +
+      '<div style="font-size:1.02rem;font-weight:700">Processos [DataJud]</div>' +
+      '<div style="font-size:.72rem;color:#94a3b8;text-transform:uppercase;letter-spacing:.1em;' +
+      'margin:.25rem 0 1.4rem">Borges Macedo Advocacia</div>' +
+      '<p style="font-size:.86rem;line-height:1.65;color:#cbd5e1;margin:0 0 1.5rem">' + motivo + '</p>' +
+      '<a href="' + PORTAL + '" style="display:block;padding:.8rem 1rem;border-radius:10px;' +
+      'background:#2563eb;color:#fff;text-decoration:none;font-weight:600;font-size:.88rem">' +
+      'Abrir a Central de Dashboards</a></div></div>';
+  };
+  if (document.body) pintar();
+  else document.addEventListener('DOMContentLoaded', pintar);
 })();
 </script>
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
