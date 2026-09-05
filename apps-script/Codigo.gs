@@ -83,6 +83,7 @@ function onOpen() {
     .addSeparator()
     .addItem('Importar processos da planilha-mae', 'importarDaPlanilhaMae')
     .addItem('Incluir processos por numero (colar lista)', 'incluirProcessosPorNumero')
+    .addItem('Buscar processos novos no diario (DJEN)', 'buscarProcessosNoDiario')
     .addItem('Aplicar OABs padrao no _Config', 'aplicarOABsPadrao')
     .addItem('Configurar tudo (1a vez)', 'configurarTudo')
     .addItem('Recriar gatilho das 6h', 'criarGatilhoDiario')
@@ -120,7 +121,14 @@ function criarGatilhoDiario() {
 
 /* ------------------------- PONTOS DE ENTRADA ---------------------------- */
 
-function sincronizacaoDiaria()       { iniciarSincronizacao_('completa', 'gatilho 6h');  executarEtapas_(); }
+function sincronizacaoDiaria() {
+  /* Antes de sincronizar, procura no diario processos que a base ainda nao
+     tem. Falha aqui nao pode derrubar a sincronizacao: se o DJEN recusar a
+     chamada, segue-se com a base como esta. */
+  try { semearDoDJEN_(30); } catch (e) {}
+  iniciarSincronizacao_('completa', 'gatilho 6h');
+  executarEtapas_();
+}
 function sincronizarCompletaMenu()   { iniciarSincronizacao_('completa', 'menu');        executarEtapas_(); }
 function sincronizarIncrementalMenu(){ iniciarSincronizacao_('incremental', 'menu');     executarEtapas_(); }
 function continuarSincronizacao()    { limparGatilhosContinuacao_();                     executarEtapas_(); }
@@ -189,6 +197,22 @@ function incluirProcessosPorNumero() {
     return;
   }
 
+  var res = incluirNumeros_(novos, 'menu');
+  ui.alert([
+    res.incluidos + ' processo(s) incluido(s) na Base geral.',
+    res.jaExistiam + ' ja existiam e foram ignorados.',
+    '',
+    res.incluidos ? 'Rode "Sincronizar agora (completa)" para buscar os dados deles no DataJud e no DJEN.'
+                  : 'Nada a fazer.'
+  ].join('\n'));
+}
+
+/**
+ * Nucleo da inclusao, usado pelo menu, pelo Web App e pela semeadura do diario.
+ * Recebe digitos ja normalizados; devolve o que fez. Nao sobrescreve nada:
+ * numero que ja existe e ignorado.
+ */
+function incluirNumeros_(digitos, origem) {
   var ss = planilha_();
   garantirConfig_(ss); garantirSync_(ss); garantirDJEN_(ss); garantirCabecalho_(ss);
   var aba = ss.getSheetByName(cfg_('ABA_BASE'));
@@ -205,12 +229,11 @@ function incluirProcessosPorNumero() {
   }
 
   var incluir = [];
-  for (var k = 0; k < novos.length; k++) {
-    if (!existentes[novos[k]]) incluir.push(novos[k]);
+  for (var k = 0; k < digitos.length; k++) {
+    if (!existentes[digitos[k]]) { incluir.push(digitos[k]); existentes[digitos[k]] = 1; }
   }
   if (!incluir.length) {
-    ui.alert('Todos os ' + novos.length + ' processos informados ja estao na Base geral.');
-    return;
+    return { incluidos: 0, jaExistiam: digitos.length, numeros: [] };
   }
 
   /* Grava so o numero, com mascara: as demais colunas sao preenchidas pela
@@ -219,21 +242,104 @@ function incluirProcessosPorNumero() {
     var linha = new Array(N_COLUNAS);
     for (var c = 0; c < N_COLUNAS; c++) linha[c] = '';
     linha[1] = mascaraCNJ_(d);
-    linha[27] = 'Incluido manualmente';   // AB — Origem do Cadastro
+    linha[27] = 'Incluido via ' + (origem || 'comando');   // AB — Origem do Cadastro
     return linha;
   });
   aba.getRange(aba.getLastRow() + 1, 1, linhas.length, N_COLUNAS).setValues(linhas);
 
   gravarSync_({ status: 'ocioso', etapa: 'inclusao',
-    mensagem: 'Incluidos ' + linhas.length + ' processos por numero.' });
+    mensagem: 'Incluidos ' + linhas.length + ' processos (' + (origem || 'comando') + ').' });
 
+  return { incluidos: incluir.length, jaExistiam: digitos.length - incluir.length,
+           numeros: incluir.map(mascaraCNJ_) };
+}
+
+/** Normaliza uma lista solta (texto colado, parametro de URL, array). */
+function numerosValidos_(entrada) {
+  var brutos = Array.isArray(entrada) ? entrada
+             : String(entrada || '').split(/[\r\n,;\s]+/);
+  var out = [], vistos = {};
+  for (var i = 0; i < brutos.length; i++) {
+    var d = soDigitos_(brutos[i]);
+    if (d.length !== 20 || vistos[d]) continue;
+    vistos[d] = 1;
+    out.push(d);
+  }
+  return out;
+}
+
+/**
+ * Semeadura automatica pelo diario: pergunta ao DJEN quais processos tiveram
+ * publicacao para as OABs do escritorio e inclui os que a base ainda nao tem.
+ *
+ * E o caminho que dispensa qualquer acao manual. Se a API responder 403 - ela
+ * costuma recusar chamadas de fora do Brasil, e o Apps Script sai dos IPs do
+ * Google - a funcao apenas nao encontra nada e a sincronizacao segue; nesse
+ * caso o painel Publicacoes DJEN, que roda no navegador, continua sendo o
+ * caminho que funciona.
+ */
+function semearDoDJEN_(dias) {
+  dias = dias || 30;
+  var oabs = listaOABs_();
+  if (!oabs.length) return { incluidos: 0, lidas: 0, erro: 'sem OAB no _Config' };
+
+  var fim = new Date();
+  var ini = new Date(fim.getTime() - dias * 86400000);
+  var fmt = function (d) { return Utilities.formatDate(d, 'America/Bahia', 'yyyy-MM-dd'); };
+
+  var achados = {}, lidas = 0, falhas = 0;
+  for (var i = 0; i < oabs.length; i++) {
+    var pagina = 1, total = 1;
+    while (pagina <= total && pagina <= 60) {
+      var url = 'https://comunicaapi.pje.jus.br/api/v1/comunicacao' +
+        '?numeroOab=' + encodeURIComponent(oabs[i].n) +
+        '&ufOab=' + encodeURIComponent(oabs[i].uf) +
+        '&dataDisponibilizacaoInicio=' + fmt(ini) +
+        '&dataDisponibilizacaoFim=' + fmt(fim) +
+        '&pagina=' + pagina + '&itensPorPagina=50';
+      var resp;
+      try {
+        resp = UrlFetchApp.fetch(url, { muteHttpExceptions: true });
+      } catch (e) { falhas++; break; }
+      if (resp.getResponseCode() !== 200) { falhas++; break; }
+      var corpo;
+      try { corpo = JSON.parse(resp.getContentText()); } catch (e) { falhas++; break; }
+      var itens = corpo.items || [];
+      total = Math.ceil((corpo.count || 0) / 50) || 1;
+      for (var k = 0; k < itens.length; k++) {
+        lidas++;
+        var d = soDigitos_(itens[k].numero_processo || itens[k].numeroprocessocommascara);
+        if (d.length === 20) achados[d] = 1;
+      }
+      pagina++;
+      Utilities.sleep(400);
+    }
+  }
+
+  var lista = Object.keys(achados);
+  if (!lista.length) return { incluidos: 0, lidas: lidas, falhas: falhas };
+  var res = incluirNumeros_(lista, 'diario');
+  res.lidas = lidas;
+  res.falhas = falhas;
+  return res;
+}
+
+/** Item de menu: procura processos novos no diario e inclui. */
+function buscarProcessosNoDiario() {
+  var ui = SpreadsheetApp.getUi();
+  var res = semearDoDJEN_(60);
+  if (res.erro) { ui.alert('Nao foi possivel: ' + res.erro); return; }
   ui.alert([
-    incluir.length + ' processo(s) incluido(s) na Base geral.',
-    (novos.length - incluir.length) + ' ja existiam e foram ignorados.',
+    'Diario consultado: ' + (res.lidas || 0) + ' publicacoes lidas.',
     '',
-    'Rode "Sincronizar agora (completa)" para buscar os dados deles',
-    'no DataJud e no DJEN.'
-  ].join('\n'));
+    (res.incluidos || 0) + ' processo(s) novo(s) incluido(s) na Base geral.',
+    (res.jaExistiam || 0) + ' ja existiam.',
+    res.falhas ? '' : null,
+    res.falhas ? 'Atencao: ' + res.falhas + ' consulta(s) falharam. A API do DJEN costuma' : null,
+    res.falhas ? 'recusar chamadas de fora do Brasil, e o Apps Script sai dos IPs do Google.' : null,
+    res.falhas ? 'Nesse caso use o botao "Incluir na base" do painel Publicacoes DJEN,' : null,
+    res.falhas ? 'que roda no seu navegador.' : null
+  ].filter(function (x) { return x !== null; }).join('\n'));
 }
 
 /** Aplica a mascara do CNJ a 20 digitos: NNNNNNN-DD.AAAA.J.TR.OOOO */
@@ -273,6 +379,28 @@ function doGet(e) {
           ScriptApp.newTrigger('continuarSincronizacao').timeBased().after(5 * 1000).create();
           saida = { ok: true, iniciada: true, sync: lerSync_() };
         }
+      }
+    } else if (acao === 'incluir') {
+      /* Permite que o painel Publicacoes DJEN mande a lista de processos que
+         sairam no diario e nao estao na base — sem colar nada e sem tocar em
+         codigo. Mesmo token do acao=atualizar. */
+      if (String(p.token || '') !== String(cfg_('TOKEN_WEBAPP'))) {
+        saida = { ok: false, erro: 'Token invalido.' };
+      } else {
+        var lista = numerosValidos_(p.numeros || '');
+        if (!lista.length) {
+          saida = { ok: false, erro: 'Nenhum numero valido recebido.' };
+        } else {
+          var r = incluirNumeros_(lista, 'painel DJEN');
+          saida = { ok: true, incluidos: r.incluidos, jaExistiam: r.jaExistiam,
+                    numeros: r.numeros };
+        }
+      }
+    } else if (acao === 'semear') {
+      if (String(p.token || '') !== String(cfg_('TOKEN_WEBAPP'))) {
+        saida = { ok: false, erro: 'Token invalido.' };
+      } else {
+        saida = { ok: true, resultado: semearDoDJEN_(Number(p.dias) || 30) };
       }
     } else {
       saida = { ok: true, sync: lerSync_() };
