@@ -244,7 +244,7 @@
 
   <div class="grid g2">
     <div class="card"><h2>Carteira por tipo de processo</h2><div class="chartbox"><canvas id="cTipo"></canvas></div></div>
-    <div class="card"><h2>Situação da carteira</h2><div class="chartbox"><canvas id="cSit"></canvas></div></div>
+    <div class="card"><h2>Status do processo</h2><div class="chartbox"><canvas id="cSit"></canvas></div></div>
   </div>
 
   <div class="grid g2">
@@ -307,7 +307,6 @@
       <div class="ms" data-campo="movimentacao" data-rotulo="Status de movimentação"></div>
       <div class="ms" data-campo="tipo" data-rotulo="Tipo"></div>
       <div class="ms" data-campo="fase" data-rotulo="Fase (DataJud)"></div>
-      <div class="ms" data-campo="situacao" data-rotulo="Situação (original)"></div>
       <div class="ms" data-campo="tribunal" data-rotulo="Tribunal"></div>
       <div class="ms" data-campo="grau" data-rotulo="Instância"></div>
       <div class="ms" data-campo="ano" data-rotulo="Ano de distribuição"></div>
@@ -509,36 +508,6 @@ const MOV_DESARQUIVA= /^desarquiv/i;
 const MOV_PAPELADA  = /^(publica|expedi|documento|disponibiliza|ato ordinat|decurso de prazo|comunica|certid|juntada|remessa|recebimento|confirmad|mero expediente)/i;
 
 /* Cada linha do histórico vem como "[G1] 05/08/2026 - Nome (complementos)". */
-function lerAndamentos(texto){
-  const out = [];
-  for (const linha of String(texto||'').split('\n')){
-    const m = /^\[([^\]]*)\]\s*([\d/]*)\s*-\s*(.+)$/.exec(linha);
-    if (!m) continue;
-    out.push({ grau: m[1], data: m[2], nome: m[3].replace(/\s*\(.*\)$/, '').trim() });
-  }
-  return out;
-}
-
-function situacaoNoTribunal(texto){
-  const L = lerAndamentos(texto);
-  if (!L.length) return null;                 // sem histórico: nada a afirmar
-  const porGrau = new Map();
-  for (const a of L){ if (!porGrau.has(a.grau)) porGrau.set(a.grau, []); porGrau.get(a.grau).push(a); }
-
-  let algumAtivo = false;
-  for (const [, andamentos] of porGrau){
-    let estado = 'Ativo';
-    for (const a of andamentos){
-      if (MOV_PAPELADA.test(a.nome)) continue;          // ruído pós-baixa
-      if (MOV_DESARQUIVA.test(a.nome)) { estado = 'Ativo'; break; }
-      if (MOV_ARQUIVA.test(a.nome))   { estado = 'Arquivado / baixado'; break; }
-      break;                                            // andamento de mérito: vivo
-    }
-    if (estado === 'Ativo') algumAtivo = true;
-  }
-  return algumAtivo ? 'Ativo' : 'Arquivado / baixado';
-}
-
 function derivarEstado(r){
   /* Duas dimensões independentes, e a planilha agora grava as duas:
        AG "Status do Processo"      — Ativo, Arquivado provisoriamente,
@@ -724,7 +693,7 @@ function alertas(){
      'Parados há mais de 180 dias (fora arquivados)', 'var(--warning)'],
     ['semPub', ROWS.filter(r=>r.qtdPub===0&&r.qtdMov>0).length,
      'Com movimentação, mas sem nenhuma publicação no DJEN', 'var(--info)'],
-    ['semFonte', ROWS.filter(r=>/sem dados/i.test(r.situacao)).length,
+    ['semFonte', ROWS.filter(r=>r.tramitacao==='Sem dados nas fontes').length,
      'Sem retorno no DataJud e no DJEN — conferir número ou sigilo', 'var(--neutral)'],
     ['cumprimento', ROWS.filter(r=>/cumprimento/i.test(r.tipo)).length,
      'Em cumprimento de sentença — foco de recebimento', 'var(--green)'],
@@ -800,7 +769,7 @@ function kpisMerito(){
 function graficos(){
   kpisMerito();
   let e = contar('tipo');           chart('cTipo','doughnut', e.map(x=>x[0]), e.map(x=>x[1]));
-  e = contar('situacao');           chart('cSit','doughnut', e.map(x=>x[0]), e.map(x=>x[1]));
+  e = contar('tramitacao');         chart('cSit','doughnut', e.map(x=>x[0]), e.map(x=>x[1]));
   e = contar('fase');               chart('cFase','doughnut', e.map(x=>x[0]), e.map(x=>x[1]));
   e = contar('faseCad');            chart('cFaseCad','doughnut', e.map(x=>x[0]), e.map(x=>x[1]));
   e = contar('sentenca');           chart('cSent','doughnut', e.map(x=>x[0]), e.map(x=>x[1]));
@@ -956,7 +925,7 @@ document.addEventListener('click', () =>
 function filtrar(){
   const hoje = new Date();
   return ROWS.filter(r=>{
-    for (const campo of ['tipo','fase','situacao','tribunal','sentenca','recurso',
+    for (const campo of ['tipo','fase','tribunal','sentenca','recurso',
                          'alvara','faseCad','tramitacao','movimentacao']){
       const sel = selecionados(campo);
       if (sel && !sel.has(String(r[campo]||''))) return false;
@@ -972,7 +941,7 @@ function filtrar(){
     if(FILTRO.alerta==='pub7'){ const d=dBR(r.dtPub); if(!(d&&(hoje-d)/864e5<=7)) return false; }
     if(FILTRO.alerta==='parado180' && !(r.dias!=null&&r.dias>180&&r.tramitacao==='Ativo')) return false;
     if(FILTRO.alerta==='semPub' && !(r.qtdPub===0&&r.qtdMov>0)) return false;
-    if(FILTRO.alerta==='semFonte' && !/sem dados/i.test(r.situacao)) return false;
+    if(FILTRO.alerta==='semFonte' && r.tramitacao!=='Sem dados nas fontes') return false;
     if(FILTRO.alerta==='cumprimento' && !/cumprimento/i.test(r.tipo)) return false;
     if(FILTRO.alerta==='recursos' && !/apelacao|agravo/i.test(nrm(r.tipo))) return false;
     if(FILTRO.busca){
@@ -1077,7 +1046,7 @@ async function abrirDetalhe(linha){
     ln('Fase (DataJud)', r.fase) + ln('Fase (cadastro)', r.faseCad) +
     ln('Status do processo', r.tramitacao + (r.statusApurado ? '' : ' (inferido — planilha ainda não regravada)')) +
     ln('Status de movimentação', r.movimentacao) +
-    ln('Situação (original da planilha)', r.situacao) +
+    ln('Situação — coluna antiga da planilha', r.situacao + ' (mantida só para conferência; fundia as duas dimensões acima)') +
     ln('Resultado da sentença', r.sentenca) + ln('Resultado do recurso', r.recurso) +
     ln('Situação do alvará', r.alvara) +
     ln('Dias sem movimentação', r.dias==null?'—':fmtN(r.dias)) +
@@ -1129,7 +1098,9 @@ const TOOLS = [
   description:'Filtra e conta processos da carteira. Devolve totais, quebras por campo e uma amostra de linhas. Use SEMPRE que a pergunta envolver quantidade, lista, ranking ou recorte da carteira.',
   input_schema:{ type:'object', properties:{
     tipo:{type:'string',description:'Tipo de Processo: Processo Principal, Cumprimento de Sentenca, Agravo de Instrumento ou Recurso de Apelacao'},
-    fase:{type:'string'}, situacao:{type:'string',description:'Ativo, Estagnado, Arquivado / baixado ou Sem dados nas fontes'},
+    fase:{type:'string'},
+    status_processo:{type:'string',description:'Ativo, Arquivado provisoriamente, Arquivado definitivamente ou Sem dados nas fontes. Vem dos andamentos e diz se o processo ainda tramita.'},
+    status_movimentacao:{type:'string',description:'Estagnado (mais de 90 dias sem andamento) ou Não estagnado. É independente do status do processo: um feito pode estar ativo e parado.'},
     tribunal:{type:'string'}, cliente:{type:'string'}, assunto:{type:'string'},
     grau:{type:'string',description:'instância isolada: JE, G1, TR, G2, TRU ou SUP (casa se o processo tiver registro naquele grau)'},
     sentenca:{type:'string',description:'Resultado da sentença: Procedência, Improcedência, Acordo Homologado, Extinção do Processo ou Não Sentenciado'},
@@ -1167,7 +1138,8 @@ function execConsultar(inp){
   let L = ROWS.filter(r=>{
     if(inp.tipo && nrm(r.tipo).indexOf(nrm(inp.tipo))<0) return false;
     if(inp.fase && nrm(r.fase).indexOf(nrm(inp.fase))<0) return false;
-    if(inp.situacao && nrm(r.situacao).indexOf(nrm(inp.situacao))<0) return false;
+    if(inp.status_processo && nrm(r.tramitacao).indexOf(nrm(inp.status_processo))<0) return false;
+    if(inp.status_movimentacao && nrm(r.movimentacao).indexOf(nrm(inp.status_movimentacao))<0) return false;
     if(inp.tribunal && nrm(r.tribunal)!==nrm(inp.tribunal)) return false;
     if(inp.grau && !r.graus.some(g=>nrm(g)===nrm(inp.grau))) return false;
     if(inp.sentenca && nrm(r.sentenca).indexOf(nrm(inp.sentenca))<0) return false;
@@ -1197,7 +1169,8 @@ function execConsultar(inp){
   });
   const out = { total_encontrado:L.length, total_na_base:ROWS.length };
   if(inp.agrupar_por){
-    const campo = {tipo:'tipo',fase:'fase',situacao:'situacao',tribunal:'tribunal',grau:'grau',
+    const campo = {tipo:'tipo',fase:'fase',status_processo:'tramitacao',
+                   status_movimentacao:'movimentacao',tribunal:'tribunal',grau:'grau',
                    cliente:'cliente',assunto:'assunto',ano:'__ano',sentenca:'sentenca',
                    recurso:'recurso',alvara:'alvara',fase_cadastro:'faseCad'}[nrm(inp.agrupar_por)] || 'tipo';
     const m={}; L.forEach(r=>{ const k = campo==='__ano' ? String(anoDe(r)||'—') : String(r[campo]||'—'); m[k]=(m[k]||0)+1; });
@@ -1213,7 +1186,8 @@ function execConsultar(inp){
   const lim = Math.min(Math.max(1, inp.limite||12), 40);
   out.amostra = L.slice(0,lim).map(r=>({
     numero:r.num, tipo:r.tipo, cliente:r.cliente||r.partes, tribunal:r.tribunal, vara:r.vara,
-    fase_datajud:r.fase, fase_cadastro:r.faseCad, situacao:r.situacao,
+    fase_datajud:r.fase, fase_cadastro:r.faseCad,
+              status_processo:r.tramitacao, status_movimentacao:r.movimentacao,
     sentenca:r.sentenca, recurso:r.recurso, alvara:r.alvara, dias_sem_movimentacao:r.dias,
     movimentos:r.qtdMov, publicacoes:r.qtdPub, ultima_movimentacao:r.ultMov,
     data_ultima_movimentacao:r.dtMov, data_ultima_publicacao:r.dtPub,
@@ -1232,7 +1206,8 @@ async function execLer(inp){
   const o = { numero:r.num, tipo:r.tipo, partes:r.partes, cliente:r.cliente, tribunal:r.tribunal,
               grau:r.grau, vara:r.vara, orgao:r.orgao, classe:r.classe, assunto:r.assunto,
               ajuizamento:r.ajuizamento, fase_datajud:r.fase, fase_cadastro:r.faseCad,
-              situacao:r.situacao, resultado_sentenca:r.sentenca,
+              status_processo:r.tramitacao, status_movimentacao:r.movimentacao,
+              resultado_sentenca:r.sentenca,
               resultado_recurso:r.recurso, situacao_alvara:r.alvara,
               dias_sem_movimentacao:r.dias, valor_causa:r.valor||null,
               total_movimentos:r.qtdMov, total_publicacoes:r.qtdPub };
@@ -1269,7 +1244,8 @@ function execPanorama(){
   return {
     total_processos: ROWS.length,
     por_tipo: g('tipo'), por_fase_datajud: g('fase'), por_fase_cadastro: g('faseCad'),
-    por_situacao: g('situacao'), por_tribunal: g('tribunal'),
+    por_status_processo: g('tramitacao'), por_status_movimentacao: g('movimentacao'),
+    por_tribunal: g('tribunal'),
     por_resultado_sentenca: g('sentenca'), por_resultado_recurso: g('recurso'),
     por_situacao_alvara: g('alvara'),
     merito: resumoMerito(ROWS),
@@ -1278,7 +1254,7 @@ function execPanorama(){
     publicacoes_ultimos_7_dias: ROWS.filter(r=>{const d=dBR(r.dtPub);return d&&(hoje-d)/864e5<=7;}).length,
     publicacoes_ultimos_30_dias: ROWS.filter(r=>{const d=dBR(r.dtPub);return d&&(hoje-d)/864e5<=30;}).length,
     ajuizados_ultimos_12_meses: ROWS.filter(r=>{const d=dBR(r.ajuizamento);return d&&(hoje-d)/864e5<=365;}).length,
-    sem_retorno_nas_fontes: ROWS.filter(r=>/sem dados/i.test(r.situacao)).length,
+    sem_retorno_nas_fontes: ROWS.filter(r=>r.tramitacao==='Sem dados nas fontes').length,
     total_movimentos: ROWS.reduce((s,r)=>s+r.qtdMov,0),
     total_publicacoes: ROWS.reduce((s,r)=>s+r.qtdPub,0),
     ultima_sincronizacao: (SYNC&&SYNC.ultimaOk)||'—'
@@ -1299,7 +1275,8 @@ function systemPrompt(){
 '- tipo: '+d('tipo').join(' | '),
 '- fase (DataJud, inferida dos movimentos): '+d('fase').join(' | '),
 '- fase_cadastro (classificação do escritório): '+d('faseCad').join(' | '),
-'- situacao: '+d('situacao').join(' | '),
+'- status_processo: '+d('tramitacao').join(' | '),
+'- status_movimentacao: '+d('movimentacao').join(' | '),
 '- sentenca: '+d('sentenca').join(' | '),
 '- recurso: '+d('recurso').join(' | '),
 '- alvara: '+d('alvara').join(' | '),
