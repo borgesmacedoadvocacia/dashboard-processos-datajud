@@ -67,9 +67,11 @@ var COLUNAS = [
   'Dias sem Movimentação','Qtd. Publicações','Data da Última Publicação','Última Publicação',
   'Fase Processual','Situação','Valor da Causa','Cliente / Parte Representada','Origem do Cadastro',
   /* espelho da planilha-mãe — classificação do escritório */
-  'Resultado da Sentença','Resultado do Recurso','Fase Processual (cadastro)','Situação do Alvará'
+  'Resultado da Sentença','Resultado do Recurso','Fase Processual (cadastro)','Situação do Alvará',
+  /* duas dimensoes independentes, gravadas para valerem tambem fora do painel */
+  'Status do Processo','Status de Movimentação'
 ];
-var N_COLUNAS = 32;
+var N_COLUNAS = 34;
 
 /* --------------------------- MENU / SETUP ------------------------------- */
 

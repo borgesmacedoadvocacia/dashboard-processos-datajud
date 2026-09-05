@@ -203,7 +203,8 @@ function consolidarDataJud_(regs, maxMov) {
     movimentos: cortar_(texto), qtdMov: qtd,
     ultMovData: recorte.length ? dataBR_(recorte[0].dt) : '',
     ultMovNome: ultNome,
-    tipo: classificarTipo_(regs),
+    tipo: classificarTipo_(regs, numero),
+    statusProcesso: statusPelosMovimentos_(movs),
     fase: inferirFase_(trilha, classes.join(' | '), ultNome, recente)
   };
 }
@@ -214,15 +215,75 @@ function consolidarDataJud_(regs, maxMov) {
  * que caia em um dos tipos pedidos; se nenhum cair, e Processo Principal.
  */
 function classificarTipo_(regs) {
+  /* A numeracao do CNJ decide antes da classe: um feito com origem 0000 ou
+     9000 nasceu no tribunal, nunca e processo principal de 1o grau. Isso
+     tambem resolve os casos em que a classe veio vazia do DataJud. */
+  var originaria = regs.length && origemOriginaria_(regs[0].numeroProcesso);
+
   for (var i = 0; i < regs.length; i++) {
     var c = norm_((regs[i].classe && regs[i].classe.nome) || '');
+    if (/mandado de seguranca/.test(c))  return 'Mandado de Segurança';
+    if (/conflito de competencia/.test(c)) return 'Conflito de Competência';
+    if (/agravo interno/.test(c))        return 'Agravo Interno';
+    if (/embargos de declaracao/.test(c)) return 'Embargos de Declaração';
     if (/agravo de instrumento/.test(c)) return 'Agravo de Instrumento';
     if (/apelacao/.test(c))              return 'Recurso de Apelação';
     if (/cumprimento de sentenca|cumprimento provisorio|cumprimento de decisao/.test(c)) {
       return 'Cumprimento de Sentença';
     }
   }
+  /* Sem classe reconhecida, a origem ainda diz que nao e principal. */
+  if (originaria) return 'Originário de tribunal';
   return 'Processo Principal';
+}
+
+/* Numeracao unificada do CNJ: NNNNNNN-DD.AAAA.J.TR.OOOO
+   Os quatro ultimos digitos (OOOO) sao a UNIDADE DE ORIGEM. Quando valem
+   0000, o feito nasceu no proprio tribunal (competencia originaria de 2o
+   grau). Alguns tribunais — TJBA, TJPE, TJRJ nesta base — usam 9000 para os
+   orgaos de 2o grau dos juizados (turmas recursais). Nos dois casos NAO se
+   trata de processo principal de 1o grau; o que ele e vem da classe. */
+function origemOriginaria_(numero) {
+  var m = String(numero || '').match(/(\d{4})\s*$/);
+  if (!m) return false;
+  return m[1] === '0000' || m[1] === '9000';
+}
+
+/* Mesma regra de statusPelosMovimentos_, aplicada ao texto ja gravado na
+   coluna N — uma linha por movimento, da mais recente para a mais antiga. */
+function statusPeloTextoDeMovimentos_(texto) {
+  if (!texto) return 'Ativo';
+  var linhas = texto.split('\n');
+  for (var i = 0; i < linhas.length; i++) {
+    var n = norm_(linhas[i]);
+    if (/desarquiv|reativacao/.test(n)) return 'Ativo';
+    if (/baixa definitiva|arquivamento definitivo|arquivado definitivamente/.test(n))
+      return 'Arquivado definitivamente';
+    if (/arquivamento provisorio|sobrestamento|suspensao do processo/.test(n))
+      return 'Arquivado provisoriamente';
+    if (/arquivamento|baixa/.test(n)) return 'Arquivado provisoriamente';
+  }
+  return 'Ativo';
+}
+
+/* Arquivamento lido dos ANDAMENTOS, na ordem em que eles acontecem.
+   A lista chega do mais recente para o mais antigo, entao vale o primeiro
+   movimento encontrado: um processo com Baixa Definitiva seguida de
+   Desarquivamento voltou a tramitar, e olhar so "contem arquivamento"
+   marcaria como arquivado quem esta ativo.
+   Na tabela do CNJ, "Baixa Definitiva" encerra o feito; "Arquivamento" sem
+   qualificacao e provisorio (sobrestamento, suspensao, arquivo do cartorio). */
+function statusPelosMovimentos_(movs) {
+  for (var i = 0; i < movs.length; i++) {
+    var n = norm_(movs[i].nome + ' ' + (movs[i].comp || ''));
+    if (/desarquiv|reativacao/.test(n)) return 'Ativo';
+    if (/baixa definitiva|arquivamento definitivo|arquivado definitivamente/.test(n))
+      return 'Arquivado definitivamente';
+    if (/arquivamento provisorio|sobrestamento|suspensao do processo/.test(n))
+      return 'Arquivado provisoriamente';
+    if (/arquivamento|baixa/.test(n)) return 'Arquivado provisoriamente';
+  }
+  return 'Ativo';
 }
 
 function inferirFase_(trilha, classe, ultima, recente) {
@@ -455,8 +516,10 @@ function etapaConsolidar_(cur, t0) {
   var nums  = aba.getRange(2 + ini, 2, qtdF, 1).getValues();
   var colQS = aba.getRange(2 + ini, 17, qtdF, 3).getValues();   // Q,R,S
   var colX  = aba.getRange(2 + ini, 24, qtdF, 1).getValues();   // X - fase
+  var colN  = aba.getRange(2 + ini, 14, qtdF, 1).getValues();   // N - movimentos
 
-  var outOP = [], outTW = [], outY = [], totalPub = Number(lerSync_().publicacoes || 0);
+  var outOP = [], outTW = [], outY = [], outAGAH = [];
+  var totalPub = Number(lerSync_().publicacoes || 0);
   if (ini === 0) totalPub = 0;
 
   for (var r2 = 0; r2 < qtdF; r2++) {
@@ -482,11 +545,23 @@ function etapaConsolidar_(cur, t0) {
     var refer    = (dtMov && dtPub) ? (dtMov > dtPub ? dtMov : dtPub) : (dtMov || dtPub);
     var dias     = refer ? Math.floor((agora - refer) / 864e5) : '';
 
+    /* Coluna Y (Situação) fica como estava, para nao quebrar quem ja a usa. */
     var sit;
     if (!qtdMov && !lista.length)                 sit = 'Sem dados nas fontes';
     else if (/arquiv|baixa/.test(norm_(fase)))    sit = 'Arquivado / baixado';
     else if (dias !== '' && dias > diasEst)       sit = 'Estagnado';
     else                                          sit = 'Ativo';
+
+    /* AG e AH: as duas dimensoes separadas, que a coluna Y funde.
+       O status do processo sai do texto dos andamentos ja gravado na coluna N
+       — e a leitura respeita a ordem, entao Desarquivamento posterior a uma
+       Baixa Definitiva devolve o processo para "Ativo". */
+    var statusProc = (!qtdMov && !lista.length)
+      ? 'Sem dados nas fontes'
+      : statusPeloTextoDeMovimentos_(String(colN[r2][0] || ''));
+    var statusMov = dias === '' ? 'Sem data de movimento'
+                  : (dias > diasEst ? 'Estagnado' : 'Não estagnado');
+    outAGAH.push([statusProc, statusMov]);
 
     outOP.push([cortar_(textoPub), carimbo]);
     outTW.push([dias, lista.length,
@@ -501,6 +576,7 @@ function etapaConsolidar_(cur, t0) {
     aba.getRange(base, 15, n2, 2).setValues(outOP.slice(off, off + n2));
     aba.getRange(base, 20, n2, 4).setValues(outTW.slice(off, off + n2));
     aba.getRange(base, 25, n2, 1).setValues(outY.slice(off, off + n2));
+    aba.getRange(base, 33, n2, 2).setValues(outAGAH.slice(off, off + n2));   // AG, AH
   }
 
   gravarSync_({ progresso: 88 + Math.round(10 * fim / qtdL), publicacoes: totalPub,

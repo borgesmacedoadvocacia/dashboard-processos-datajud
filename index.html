@@ -303,8 +303,8 @@
         <button class="btn btn-buscar" id="btnBuscar" title="Pesquisar (Enter)">&#128269; Pesquisar</button>
         <button class="btn btn-limpa-busca oculto" id="btnLimparBusca" title="Limpar a busca">&times;</button>
       </div>
-      <div class="ms" data-campo="tramitacao" data-rotulo="Tramitação"></div>
-      <div class="ms" data-campo="movimentacao" data-rotulo="Movimentação"></div>
+      <div class="ms" data-campo="tramitacao" data-rotulo="Status do processo"></div>
+      <div class="ms" data-campo="movimentacao" data-rotulo="Status de movimentação"></div>
       <div class="ms" data-campo="tipo" data-rotulo="Tipo"></div>
       <div class="ms" data-campo="fase" data-rotulo="Fase (DataJud)"></div>
       <div class="ms" data-campo="situacao" data-rotulo="Situação (original)"></div>
@@ -365,7 +365,9 @@ const COL = { tipo:0,num:1,partes:2,tribunal:3,vara:4,grau:5,classe:6,assunto:7,
               atualizado:0,qtdMov:1,dtMov:2,ultMov:3,diasSemMov:4,qtdPub:5,dtPub:6,ultPub:7,
               fase:8,situacao:9,valor:10,cliente:11,origem:12,
               /* espelho da planilha-mãe (AC..AF) */
-              sentenca:13,recurso:14,faseCad:15,alvara:16 };
+              sentenca:13,recurso:14,faseCad:15,alvara:16,
+              /* gravadas pelo Apps Script a partir dos andamentos */
+              statusProcesso:17,statusMov:18 };
 
 let ROWS = [], FILTRO = {}, CHARTS = {}, ORDEM = { campo:'diasSemMov', asc:false }, SYNC = null, TIMER=null;
 
@@ -411,11 +413,11 @@ async function sheets(ranges){
 async function carregar(){
   let vr;
   try{
-    vr = await sheets(["'"+ABA+"'!A2:M", "'"+ABA+"'!P2:AF", "'"+ABA_SYNC+"'!A1:B11"]);
+    vr = await sheets(["'"+ABA+"'!A2:M", "'"+ABA+"'!P2:AH", "'"+ABA_SYNC+"'!A1:B11"]);
   }catch(e){
     /* a aba _Sync só existe depois que o Apps Script é instalado */
     try{
-      vr = await sheets(["'"+ABA+"'!A2:M", "'"+ABA+"'!P2:AF"]);
+      vr = await sheets(["'"+ABA+"'!A2:M", "'"+ABA+"'!P2:AH"]);
       vr.push({values:[]});
     }catch(e2){
       $('#syncInfo').innerHTML = '<b style="color:var(--danger)">Erro ao ler a planilha</b><br>'+esc(e2.message.slice(0,90));
@@ -463,7 +465,9 @@ async function carregar(){
       sentenca: String(b[COL.sentenca]||'').trim(),
       recurso: String(b[COL.recurso]||'').trim(),
       faseCad: String(b[COL.faseCad]||'').trim(),
-      alvara: String(b[COL.alvara]||'').trim()
+      alvara: String(b[COL.alvara]||'').trim(),
+      statusProcesso: String(b[COL.statusProcesso]||'').trim(),
+      statusMov: String(b[COL.statusMov]||'').trim()
     });
     /* A coluna "situacao" da planilha é uma cascata: arquivado vence estagnado,
        que vence ativo. Isso funde duas coisas independentes — se o processo
@@ -536,98 +540,40 @@ function situacaoNoTribunal(texto){
 }
 
 function derivarEstado(r){
+  /* Duas dimensões independentes, e a planilha agora grava as duas:
+       AG "Status do Processo"      — Ativo, Arquivado provisoriamente,
+                                      Arquivado definitivamente
+       AH "Status de Movimentação"  — Estagnado ou Não estagnado
+     O status do processo sai dos ANDAMENTOS, na ordem em que aconteceram:
+     uma Baixa Definitiva seguida de Desarquivamento devolve o feito para
+     ativo, e olhar só "contém arquivamento" marcaria como arquivado quem
+     voltou a tramitar. */
   const semFonte = /sem dados/i.test(r.situacao) || (!r.qtdMov && !r.qtdPub);
 
-  if (semFonte){
-    r.tramitacao = 'Sem dados nas fontes';
-    r.fonteTramitacao = 'sem retorno das fontes';
-  } else if (r.tramitacaoTribunal){
-    /* Veio da leitura do andamento processual — é a resposta boa. */
-    r.tramitacao = r.tramitacaoTribunal;
-    r.fonteTramitacao = 'consulta processual';
+  if (r.statusProcesso) {
+    r.tramitacao = r.statusProcesso;
+    r.statusApurado = true;
   } else {
-    /* Enquanto o histórico não chega, vale a leitura da fase. Fica marcado
-       como estimativa para ninguém tomar decisão achando que é definitivo. */
-    r.tramitacao = /arquiv|baixa/i.test(r.situacao) || /arquiv|baixa/i.test(r.fase)
-      ? 'Arquivado / baixado' : 'Ativo';
-    r.fonteTramitacao = 'estimada pela fase';
+    /* Enquanto o Apps Script não for reimplantado, a coluna vem vazia. O
+       painel cai na inferência antiga — mais grosseira, sem distinguir
+       provisório de definitivo — em vez de mostrar tela vazia. */
+    const arquivado = /arquiv|baixa/i.test(r.situacao) || /arquiv|baixa/i.test(r.fase);
+    r.tramitacao = semFonte ? 'Sem dados nas fontes'
+                 : arquivado ? 'Arquivado definitivamente' : 'Ativo';
+    r.statusApurado = false;
   }
 
-  r.movimentacao = r.dias == null ? 'Sem data de movimento'
-                 : r.dias > DIAS_ESTAGNADO ? 'Estagnado'
-                 : 'Em movimento';
+  r.movimentacao = r.statusMov ||
+    (r.dias == null ? 'Sem data de movimento'
+     : r.dias > DIAS_ESTAGNADO ? 'Estagnado' : 'Não estagnado');
 
-  /* O cruzamento das duas — é o que responde "ativo e parado" ou
-     "arquivado e parado", que a coluna única não conseguia dizer. */
   r.estado = r.tramitacao === 'Sem dados nas fontes'
     ? 'Sem dados nas fontes'
     : r.tramitacao + ' · ' + (r.movimentacao === 'Sem data de movimento'
         ? 'sem data de movimento' : r.movimentacao.toLowerCase());
 }
 
-/* ---------------------------------------------------------------------
-   O histórico de andamentos (coluna N) pesa 8 MB — carregá-lo junto com a
-   página atrasaria a abertura e voltaria a cada atualização automática. Ele
-   é buscado uma vez por sessão, em segundo plano: o painel abre com a
-   estimativa pela fase e se corrige sozinho quando o histórico chega.
-   --------------------------------------------------------------------- */
-let ANDAMENTOS_OK = false, ANDAMENTOS_CARREGANDO = false;
-
-async function carregarAndamentos(){
-  if (ANDAMENTOS_OK || ANDAMENTOS_CARREGANDO || !ROWS.length) return;
-  ANDAMENTOS_CARREGANDO = true;
-  avisoTramitacao('carregando');
-  try{
-    const ultima = ROWS.reduce((m, r) => Math.max(m, r.linha), 1);
-    const partes = [];
-    /* Em fatias, para não estourar o limite de tamanho de uma resposta. */
-    for (let ini = 2; ini <= ultima; ini += 1000)
-      partes.push("'" + ABA + "'!N" + ini + ":N" + Math.min(ini + 999, ultima));
-
-    const blocos = await sheets(partes);
-    const texto = {};
-    let linha = 2;
-    for (const bloco of blocos){
-      const vals = bloco.values || [];
-      for (let i = 0; i < vals.length; i++)
-        texto[linha + i] = String((vals[i] || [])[0] || '');
-      linha += 1000;
-    }
-
-    let corrigidos = 0;
-    for (const r of ROWS){
-      const t = texto[r.linha];
-      if (!t) continue;
-      const antes = r.tramitacao;
-      r.tramitacaoTribunal = situacaoNoTribunal(t);
-      derivarEstado(r);
-      if (r.tramitacao !== antes) corrigidos++;
-    }
-    ANDAMENTOS_OK = true;
-    avisoTramitacao('ok', corrigidos);
-    render();
-  }catch(e){
-    console.error(e);
-    avisoTramitacao('erro');
-  }finally{
-    ANDAMENTOS_CARREGANDO = false;
-  }
-}
-
-function avisoTramitacao(estado, corrigidos){
-  const el = $('#avisoTram');
-  if (!el) return;
-  if (estado === 'carregando')
-    el.innerHTML = '<span class="chip" style="color:var(--warning);background:var(--warning-light)">' +
-      'lendo o andamento processual…</span> a coluna Tramitação ainda mostra a estimativa pela fase';
-  else if (estado === 'ok')
-    el.innerHTML = '<span class="chip" style="color:var(--green);background:var(--green-light)">' +
-      'tramitação conferida no andamento processual</span>' +
-      (corrigidos ? ' · <b>' + fmtN(corrigidos) + '</b> processo(s) mudaram de estado em relação à estimativa' : '');
-  else
-    el.innerHTML = '<span class="chip" style="color:var(--danger);background:var(--danger-light)">' +
-      'não foi possível ler o andamento</span> a coluna Tramitação segue estimada pela fase';
-}
+const ARQUIVADO = t => /arquivado/i.test(t || '');
 
 /* =====================================================================
    SINCRONIZAÇÃO (Web App do Apps Script)
@@ -706,16 +652,37 @@ function avisoSetup(){
       : '<div>Clique em ⚙ e cole a URL do Web App (…/exec) para que o botão Atualizar dispare a busca completa.</div>');
 }
 
+/* Enquanto o Apps Script não for reimplantado, as colunas AG e AH vêm vazias
+   e o painel usa a inferência antiga — que não separa arquivamento provisório
+   de definitivo e erra por baixo. Dizer isso é melhor do que exibir números
+   piores em silêncio. */
+function avisoOrigemDoStatus(){
+  const el = document.getElementById('avisoTram');
+  if (!el) return;
+  const apurados = ROWS.filter(r=>r.statusApurado).length;
+  if (apurados === ROWS.length && ROWS.length) {
+    el.innerHTML = 'Status do processo lido dos <b>andamentos</b> (colunas AG e AH da planilha).';
+    el.style.color = 'var(--text-sub)';
+    return;
+  }
+  el.innerHTML = apurados
+    ? `<b style="color:var(--warning)">Parcial:</b> ${fmtN(apurados)} de ${fmtN(ROWS.length)} processos com status apurado dos andamentos; o restante usa a inferência antiga.`
+    : '<b style="color:var(--warning)">Atenção:</b> a planilha ainda não tem as colunas <b>Status do Processo</b> e <b>Status de Movimentação</b>. ' +
+      'O painel está usando a inferência anterior, que <b>não separa arquivamento provisório de definitivo</b> e subconta arquivados. ' +
+      'Reimplante o Apps Script e rode <b>Atualizar</b> para gravá-las.';
+  el.style.color = 'var(--text-sub)';
+}
+
 function kpis(){
   const R = ROWS;
   const ativos     = R.filter(r=>r.tramitacao==='Ativo').length;
-  const arq        = R.filter(r=>r.tramitacao==='Arquivado / baixado').length;
+  const arqDef     = R.filter(r=>r.tramitacao==='Arquivado definitivamente').length;
+  const arqProv    = R.filter(r=>r.tramitacao==='Arquivado provisoriamente').length;
   const semDados   = R.filter(r=>r.tramitacao==='Sem dados nas fontes').length;
   const estag      = R.filter(r=>r.movimentacao==='Estagnado').length;
   /* O cruzamento que a coluna única não dava: parado E ainda tramitando é
      problema nosso; parado E arquivado é só histórico. */
   const ativoParado = R.filter(r=>r.tramitacao==='Ativo' && r.movimentacao==='Estagnado').length;
-  const arqParado   = R.filter(r=>r.tramitacao==='Arquivado / baixado' && r.movimentacao==='Estagnado').length;
   const hoje       = new Date();
   const pub30      = R.filter(r=>{const d=dBR(r.dtPub);return d&&(hoje-d)/864e5<=30;}).length;
   const valores    = R.map(r=>r.valor).filter(v=>v>0).sort((a,b)=>a-b);
@@ -727,13 +694,14 @@ function kpis(){
   const K = [
     ['Processos na base', fmtN(R.length), semDados?fmtN(semDados)+' sem retorno das fontes':'todos com dados', 'var(--primary)', {}],
     ['Ativos', fmtN(ativos), pct(ativos,R.length)+' · ainda tramitando', 'var(--green)', {tramitacao:'Ativo'}],
-    ['Arquivados / baixados', fmtN(arq), pct(arq,R.length), 'var(--neutral)', {tramitacao:'Arquivado / baixado'}],
-    ['Ativos e parados', fmtN(ativoParado),
-     'tramitando e sem movimento > '+DIAS_ESTAGNADO+' dias', 'var(--danger)',
+    ['Arquivados definitivamente', fmtN(arqDef), pct(arqDef,R.length)+' · baixa definitiva nos autos',
+     'var(--neutral)', {tramitacao:'Arquivado definitivamente'}],
+    ['Arquivados provisoriamente', fmtN(arqProv),
+     'sobrestados ou no arquivo do cartório — podem voltar', 'var(--warning)',
+     {tramitacao:'Arquivado provisoriamente'}],
+    ['Ativos e estagnados', fmtN(ativoParado),
+     'tramitando e sem movimento há mais de '+DIAS_ESTAGNADO+' dias', 'var(--danger)',
      {tramitacao:'Ativo', movimentacao:'Estagnado'}],
-    ['Arquivados e parados', fmtN(arqParado),
-     'parados porque acabaram — não exigem ação', 'var(--neutral)',
-     {tramitacao:'Arquivado / baixado', movimentacao:'Estagnado'}],
     ['Publicações em 30 dias', fmtN(pub30), 'processos com prazo em curso', 'var(--warning)', {pub30:true}],
     ['Ajuizados em 12 meses', fmtN(novos12m), 'entrada da carteira', 'var(--info)', {novos12m:true}],
     ['Valor da causa (mediana)', fmtM(mediana), fmtN(valores.length)+' com valor informado', 'var(--primary-mid)', {}],
@@ -742,6 +710,7 @@ function kpis(){
   $('#kpis').innerHTML = K.map((k,i)=>
     '<div class="kpi'+(Object.keys(k[4]).length?'':' static')+'" style="--accent:'+k[3]+'" data-k="'+i+'">'+
     '<div class="lbl">'+k[0]+'</div><div class="val mono">'+k[1]+'</div><div class="sub">'+k[2]+'</div></div>').join('');
+  avisoOrigemDoStatus();
   $$('#kpis .kpi').forEach(el=>el.onclick=()=>{ const f=K[+el.dataset.k][4]; if(Object.keys(f).length){ FILTRO=Object.assign({},f); sincronizarSelects(); tabela(); $('.tabwrap').scrollIntoView({behavior:'smooth'}); } });
 }
 const pct = (a,b) => b? (100*a/b).toFixed(1).replace('.',',')+'% da carteira' : '—';
@@ -857,7 +826,7 @@ function graficos(){
 /* ------------------------------ tabela ------------------------------- */
 const COLUNAS_TAB = [
   ['num','Nº do processo'],['tipo','Tipo'],['cliente','Cliente'],['tribunal','Trib.'],['grau','Inst.'],
-  ['vara','Vara / órgão'],['fase','Fase'],['tramitacao','Tramitação'],['movimentacao','Movimento'],['dias','Dias parado'],
+  ['vara','Vara / órgão'],['fase','Fase'],['tramitacao','Status do processo'],['movimentacao','Movimentação'],['dias','Dias parado'],
   ['qtdMov','Mov.'],['qtdPub','Pub.'],['dtPub','Últ. publicação'],
   ['sentenca','Sentença'],['recurso','Recurso'],['alvara','Alvará'],['ultMov','Última movimentação']
 ];
@@ -1072,12 +1041,16 @@ function chipSent(t){
 }
 /* Serve às duas dimensões: verde para o que está vivo e andando, vermelho
    para o que parou, cinza para o que já se encerrou. */
+/* Serve às duas dimensões. Arquivado provisoriamente fica em âmbar: o feito
+   pode voltar, então não é o mesmo cinza de quem já acabou. */
 function chipSit(s){
-  const bom = s==='Ativo' || s==='Em movimento';
+  const bom  = s==='Ativo' || s==='Não estagnado' || s==='Em movimento';
   const ruim = s==='Estagnado';
-  const c  = bom ? 'var(--green)' : ruim ? 'var(--danger)'
+  const prov = /provisoriamente|sobrestad/i.test(s);
+  const c  = bom ? 'var(--green)' : ruim ? 'var(--danger)' : prov ? 'var(--warning)'
            : /arquiv|baixa/i.test(s) ? 'var(--neutral)' : 'var(--text-muted)';
-  const bg = bom ? 'var(--green-light)' : ruim ? 'var(--danger-light)' : 'var(--neutral-light)';
+  const bg = bom ? 'var(--green-light)' : ruim ? 'var(--danger-light)'
+           : prov ? 'var(--warning-light)' : 'var(--neutral-light)';
   return '<span class="chip" style="color:'+c+';background:'+bg+'">'+esc(s)+'</span>';
 }
 
@@ -1102,7 +1075,8 @@ async function abrirDetalhe(linha){
     ln('Ajuizamento', r.ajuizamento) + ln('Sistema / formato', [r.sistema,r.formato].filter(Boolean).join(' · ')) +
     ln('Nível de sigilo', String(r.sigilo)) +
     ln('Fase (DataJud)', r.fase) + ln('Fase (cadastro)', r.faseCad) +
-    ln('Tramitação', r.tramitacao) + ln('Movimentação', r.movimentacao) +
+    ln('Status do processo', r.tramitacao + (r.statusApurado ? '' : ' (inferido — planilha ainda não regravada)')) +
+    ln('Status de movimentação', r.movimentacao) +
     ln('Situação (original da planilha)', r.situacao) +
     ln('Resultado da sentença', r.sentenca) + ln('Resultado do recurso', r.recurso) +
     ln('Situação do alvará', r.alvara) +
@@ -1442,7 +1416,7 @@ $('#btnLimpar').onclick = () => { FILTRO={}; $('#fBusca').value='';
 function matrizExport(){
   const L = filtrar();
   const cab = ['Numero','Tipo','Cliente','Partes','Tribunal','Grau','Vara','Classe','Assunto','Ajuizamento',
-               'Fase (DataJud)','Fase (cadastro)','Tramitacao','Movimentacao','Estado (cruzamento)',
+               'Fase (DataJud)','Fase (cadastro)','Status do Processo','Status de Movimentacao','Estado (cruzamento)',
                'Situacao (original)','Resultado da sentenca','Resultado do recurso',
                'Situacao do alvara','Dias sem movimentacao','Movimentos','Publicacoes','Ultima movimentacao',
                'Data ultima movimentacao','Data ultima publicacao','Valor da causa'];
