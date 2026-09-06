@@ -332,6 +332,17 @@
     </div>
   </div>
 
+  <!-- DESEMPENHO POR PRODUTO -->
+  <div class="card">
+    <h2>Desempenho por produto jurídico</h2>
+    <div style="font-size:12px;color:var(--text-sub);margin:-4px 0 10px" id="prodSub">&mdash;</div>
+    <div class="tabwrap" id="t-produto"></div>
+    <div style="font-size:12px;color:var(--text-sub);margin-top:10px">O produto vem cadastrado na planilha Clientes e Processos. O índice de
+      procedência considera apenas o mérito julgado &mdash; extinção e acordo aparecem na contagem
+      e ficam fora do índice, porque neles ninguém julgou o pedido. Clique numa linha para
+      filtrar a carteira por aquele produto.</div>
+  </div>
+
   <div class="card">
     <h2>Carteira de processos <span id="tabInfo"></span></h2>
     <div id="avisoTram" style="font-size:12px;color:var(--text-sub);margin:-4px 0 10px"></div>
@@ -927,6 +938,56 @@ function graficos(){
 }
 
 /* ------------------------------ tabela ------------------------------- */
+/* Desempenho por produto juridico. O indice de procedencia usa so o merito
+   julgado: extincao e acordo entram na contagem e ficam fora da conta, porque
+   neles ninguem julgou o pedido - somar os dois mediria outra coisa. */
+function renderPorProduto(L){
+  const el = $('#t-produto');
+  if(!el) return;
+  const g = {};
+  for(const r of L){
+    const k = r.produto && r.produto !== '—' ? r.produto : 'Sem cadastro';
+    const a = g[k] || (g[k] = {n:0, proc:0, impr:0, ext:0, acor:0, nao:0});
+    a.n++;
+    const sv = nrm(r.sentenca||'');
+    if(sv.indexOf('procedencia')===0) a.proc++;
+    else if(sv.indexOf('improcedencia')===0) a.impr++;
+    else if(sv.indexOf('extincao')===0) a.ext++;
+    else if(sv.indexOf('acordo')===0) a.acor++;
+    else a.nao++;
+  }
+  const linhas = Object.entries(g).sort((x,y)=>y[1].n-x[1].n);
+  const total = L.length;
+  $('#prodSub').innerHTML = linhas.length
+    ? '<b>'+fmtN(total)+'</b> processos na seleção, em <b>'+linhas.length+'</b> produtos.'
+    : 'Nenhum processo na seleção.';
+  el.innerHTML = '<table><thead><tr>'+
+    '<th>Produto jurídico</th><th>Processos</th><th>Procedência</th><th>Improcedência</th>'+
+    '<th>Extinção</th><th>Acordo</th><th>Não sentenciado</th><th>Índice de procedência</th>'+
+    '</tr></thead><tbody>'+
+    linhas.map(([nome,a])=>{
+      const base = a.proc + a.impr;
+      const idx = base ? a.proc/base*100 : null;
+      const c = idx===null ? 'var(--text-muted)' : idx>=45 ? 'var(--green)' : idx>=25 ? 'var(--warning)' : 'var(--danger)';
+      return '<tr data-p="'+esc(nome)+'" style="cursor:pointer">'+
+        '<td><b>'+esc(nome)+'</b></td>'+
+        '<td class="mono">'+fmtN(a.n)+'</td>'+
+        '<td class="mono">'+fmtN(a.proc)+'</td>'+
+        '<td class="mono">'+fmtN(a.impr)+'</td>'+
+        '<td class="mono">'+fmtN(a.ext)+'</td>'+
+        '<td class="mono">'+fmtN(a.acor)+'</td>'+
+        '<td class="mono">'+fmtN(a.nao)+'</td>'+
+        '<td><span class="chip" style="color:'+c+';background:rgba(255,255,255,.05)">'+(idx===null?'sem mérito julgado':idx.toFixed(1).replace('.',',')+'%')+
+          '</span><br><span class="muted" style="font-size:11px">'+fmtN(base)+' julgados no mérito</span></td>'+
+        '</tr>';
+    }).join('')+'</tbody></table>';
+  $$('#t-produto tbody tr').forEach(tr=>tr.onclick=()=>{
+    FILTRO.produto = new Set([tr.dataset.p]);
+    render();
+    document.querySelector('#tbody').scrollIntoView({behavior:'smooth', block:'start'});
+  });
+}
+
 const COLUNAS_TAB = [
   ['num','Nº do processo'],['tipo','Tipo'],['cliente','Cliente'],
   ['produto','Produto jurídico'],['reu','Réu'],['tribunal','Trib.'],['grau','Inst.'],
@@ -1108,10 +1169,13 @@ function tabela(){
   $$('#thead th').forEach(th=>th.onclick=()=>{ const c=th.dataset.c; ORDEM = {campo:c, asc: ORDEM.campo===c ? !ORDEM.asc : false}; tabela(); });
 
   const vis = L.slice(0,600);
+  renderPorProduto(L);
   $('#tbody').innerHTML = vis.map(r=>'<tr data-l="'+r.linha+'">'+
     '<td class="mono" style="white-space:nowrap">'+esc(r.num)+'</td>'+
     '<td>'+chipTipo(r.tipo)+'</td>'+
     '<td><span class="trunc" style="max-width:170px">'+esc(r.cliente||r.partes||'—')+'</span></td>'+
+    '<td><span class="trunc" style="max-width:150px">'+esc(r.produto||'—')+'</span></td>'+
+    '<td><span class="trunc" style="max-width:150px">'+esc(r.reu||'—')+'</span></td>'+
     '<td>'+esc(r.tribunal)+'</td>'+
     '<td style="white-space:nowrap">'+esc(r.graus.join(' › ')||'—')+'</td>'+
     '<td><span class="trunc" style="max-width:190px">'+esc(r.vara||r.orgao||'—')+'</span></td>'+
