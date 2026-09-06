@@ -324,6 +324,134 @@ function semearDoDJEN_(dias) {
   return res;
 }
 
+/* ===================================================================
+   RESULTADO VINDO DO DIARIO
+   =================================================================== */
+
+/* Confianca minima para tocar na base. A leitura do dispositivo e heuristica;
+   abaixo disto a divergencia continua exposta no painel para decisao humana,
+   e nada e escrito. */
+var CONF_MINIMA_RESULTADO = 80;
+
+var ABA_LOG_RES = '_ResultadosDJEN';
+
+/* Codigo compacto vindo do painel -> valor gravado na planilha. O painel manda
+   a letra para caber na URL; o vocabulario gravado e o da planilha. */
+function valorSentenca_(cod) {
+  var m = { P: 'Proced\u00eancia', R: 'Proced\u00eancia', I: 'Improced\u00eancia',
+            E: 'Extin\u00e7\u00e3o do Processo', A: 'Acordo Homologado' };
+  return m[cod] || '';
+}
+function valorRecurso_(cod) {
+  var m = { V: 'Provido', W: 'Provido', N: 'N\u00e3o Provido' };
+  return m[cod] || '';
+}
+/* Rotulo do que foi realmente lido, para o log nao perder o parcial. */
+function rotuloDispositivo_(cod) {
+  var m = { P: 'Procedente', R: 'Parcialmente procedente', I: 'Improcedente',
+            E: 'Extin\u00e7\u00e3o do processo', A: 'Acordo homologado',
+            V: 'Recurso provido', W: 'Recurso parcialmente provido', N: 'Recurso n\u00e3o provido' };
+  return m[cod] || cod;
+}
+
+function garantirLogResultados_(ss) {
+  var aba = ss.getSheetByName(ABA_LOG_RES);
+  if (!aba) {
+    aba = ss.insertSheet(ABA_LOG_RES);
+    aba.getRange(1, 1, 1, 9).setValues([[
+      'Quando', 'Processo', 'Campo', 'Valor anterior', 'Valor gravado',
+      'Dispositivo lido no diario', 'Confianca', 'Data da publicacao', 'Certidao'
+    ]]);
+    aba.setFrozenRows(1);
+  }
+  return aba;
+}
+
+/* "Vazio" para efeito de escrita: campo em branco ou o valor de espera. Um
+   valor posto por gente nunca e considerado vazio. */
+function podeGravarSentenca_(atual) {
+  var t = norm_(String(atual || ''));
+  return !t || t.indexOf('nao sentenciado') === 0;
+}
+function podeGravarRecurso_(atual) {
+  var t = norm_(String(atual || ''));
+  return !t || t.indexOf('nao houve recurso') === 0 || t.indexOf('aguardando julgamento') === 0;
+}
+
+/**
+ * Aplica os resultados lidos no diario.
+ * Cada item: { n: 20 digitos, c: codigo, k: 'S'|'R', cf: confianca,
+ *              d: data da publicacao, h: hash da certidao }
+ */
+function aplicarResultados_(itens) {
+  var ss = planilha_();
+  garantirCabecalho_(ss);
+  var aba = ss.getSheetByName(cfg_('ABA_BASE'));
+  var ult = aba.getLastRow();
+  if (ult < 2) return { gravados: 0, ignorados: itens.length, baixaConfianca: 0 };
+
+  var qtd = ult - 1;
+  var nums = aba.getRange(2, 2, qtd, 1).getValues();
+  var linhaDe = {};
+  for (var i = 0; i < qtd; i++) {
+    var n = soDigitos_(nums[i][0]);
+    if (n.length === 20 && linhaDe[n] === undefined) linhaDe[n] = i;
+  }
+
+  /* AC (29) e AD (30) — resultado da sentenca e do recurso. */
+  var col = aba.getRange(2, 29, qtd, 2).getValues();
+  var antes = JSON.stringify(col);
+
+  var log = [], baixa = 0, semLinha = 0, ocupado = 0;
+  for (var k = 0; k < itens.length; k++) {
+    var it = itens[k] || {};
+    var conf = Number(it.cf || 0);
+    if (conf < CONF_MINIMA_RESULTADO) { baixa++; continue; }
+    var idx = linhaDe[String(it.n || '')];
+    if (idx === undefined) { semLinha++; continue; }
+
+    var eSentenca = String(it.k || 'S') === 'S';
+    var atual = eSentenca ? col[idx][0] : col[idx][1];
+    var novo = eSentenca ? valorSentenca_(it.c) : valorRecurso_(it.c);
+    if (!novo) continue;
+    var liberado = eSentenca ? podeGravarSentenca_(atual) : podeGravarRecurso_(atual);
+    if (!liberado) { ocupado++; continue; }
+
+    if (eSentenca) col[idx][0] = novo; else col[idx][1] = novo;
+    log.push([new Date(), formatarCNJ_(it.n),
+              eSentenca ? 'Resultado da Sentenca' : 'Resultado do Recurso',
+              String(atual || ''), novo, rotuloDispositivo_(it.c), conf,
+              String(it.d || ''),
+              it.h ? 'https://comunicaapi.pje.jus.br/api/v1/comunicacao/' + it.h + '/certidao' : '']);
+  }
+
+  if (JSON.stringify(col) !== antes) {
+    aba.getRange(2, 29, qtd, 2).setValues(col);
+  }
+  if (log.length) {
+    var abaLog = garantirLogResultados_(ss);
+    abaLog.getRange(abaLog.getLastRow() + 1, 1, log.length, 9).setValues(log);
+  }
+  gravarSync_({ status: 'ocioso', etapa: 'resultado',
+    mensagem: 'Gravados ' + log.length + ' resultados vindos do diario.' });
+  return { gravados: log.length, baixaConfianca: baixa,
+           semCadastro: semLinha, jaPreenchidos: ocupado };
+}
+
+/* Formato compacto para caber na URL: n:codigo:tipo:confianca:data:hash,
+   separados por barra vertical. */
+function lerResultados_(texto) {
+  var out = [];
+  String(texto || '').split('|').forEach(function (parte) {
+    var c = String(parte).split(':');
+    if (c.length < 4) return;
+    var n = soDigitos_(c[0]);
+    if (n.length !== 20) return;
+    out.push({ n: n, c: c[1], k: c[2], cf: Number(c[3] || 0), d: c[4] || '', h: c[5] || '' });
+  });
+  return out;
+}
+
 /** Item de menu: procura processos novos no diario e inclui. */
 function buscarProcessosNoDiario() {
   var ui = SpreadsheetApp.getUi();
@@ -394,6 +522,20 @@ function doGet(e) {
           var r = incluirNumeros_(lista, 'painel DJEN');
           saida = { ok: true, incluidos: r.incluidos, jaExistiam: r.jaExistiam,
                     numeros: r.numeros };
+        }
+      }
+    } else if (acao === 'resultado') {
+      /* O painel Publicacoes DJEN manda o que saiu no diario; aqui so entra o
+         que passa do limiar de confianca e cai em campo ainda vazio. */
+      if (String(p.token || '') !== String(cfg_('TOKEN_WEBAPP'))) {
+        saida = { ok: false, erro: 'Token invalido.' };
+      } else {
+        var itens = lerResultados_(p.dados || '');
+        if (!itens.length) {
+          saida = { ok: false, erro: 'Nenhum resultado valido recebido.' };
+        } else {
+          saida = { ok: true, resultado: aplicarResultados_(itens),
+                    limiar: CONF_MINIMA_RESULTADO };
         }
       }
     } else if (acao === 'semear') {
