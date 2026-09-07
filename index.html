@@ -1121,7 +1121,9 @@ document.addEventListener('click', () =>
 function filtrar(){
   const hoje = new Date();
   return ROWS.filter(r=>{
-    for (const campo of ['tipo','fase','tribunal','sentenca','recurso',
+    /* 'produto' precisa estar aqui: sem ele o chip registra a escolha e a
+       tabela ignora, e o filtro de produto não filtra nada. */
+    for (const campo of ['tipo','fase','tribunal','sentenca','recurso','produto',
                          'alvara','faseCad','tramitacao','movimentacao']){
       const sel = selecionados(campo);
       if (sel && !sel.has(String(r[campo]||''))) return false;
