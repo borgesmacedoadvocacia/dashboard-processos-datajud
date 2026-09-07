@@ -252,6 +252,23 @@
   .sug button:hover{border-color:var(--primary);color:var(--primary-mid);}
   .keybar{border:1px dashed var(--border);border-radius:10px;padding:11px 13px;font-size:12px;
           color:var(--text-sub);display:flex;gap:9px;align-items:center;flex-wrap:wrap;}
+  /* -- CRUZAMENTO COM O DIARIO -- */
+  .djbar{display:flex;flex-wrap:wrap;gap:10px;align-items:center;margin-bottom:14px}
+  .djbar label{font-size:12px;color:var(--text-sub);display:flex;align-items:center;gap:6px}
+  .djbar select{padding:7px 10px;border:1px solid var(--border);border-radius:8px;
+    background:var(--card);color:var(--text);font-size:12px}
+  .djstatus{font-size:12px;color:var(--text-sub);flex:1;min-width:200px}
+  .djchips{display:flex;flex-wrap:wrap;gap:7px;margin:12px 0 10px}
+  .djchip{padding:5px 11px;border:1px solid var(--border);background:var(--card);
+    color:var(--text-sub);border-radius:20px;font-size:12px;cursor:pointer;white-space:nowrap}
+  .djchip:hover{border-color:var(--info);color:var(--text)}
+  .djchip.on{background:var(--info);border-color:var(--info);color:#fff;font-weight:500}
+  .djchip b{font-variant-numeric:tabular-nums}
+  .djdiag{font-size:11px;padding:2px 8px;border-radius:20px;white-space:nowrap;font-weight:500}
+  .djseta{color:var(--text-muted);padding:0 4px}
+  #tDjen td{vertical-align:top}
+  #tDjen .antes{color:var(--text-muted)}
+  #tDjen .depois{font-weight:600}
   footer{text-align:center;color:var(--text-muted);font-size:11px;margin-top:26px;}
   .hide{display:none !important;}
 </style>
@@ -343,6 +360,40 @@
       filtrar a carteira por aquele produto.</div>
   </div>
 
+  <!-- CRUZAMENTO COM O DIARIO -->
+  <div class="card" id="cardDjen" style="margin-bottom:16px">
+    <h2>Cruzamento com o diário <span>lê o DJEN ao vivo e confere processo a processo</span></h2>
+    <div style="font-size:12px;color:var(--text-sub);margin:-4px 0 12px;line-height:1.55">
+      As colunas <b>Resultado da Sentença</b> e <b>Resultado do Recurso</b> desta base são
+      <b>cadastro manual</b>, e cadastro manual atrasa. O DJEN publica a decisão no dia em que
+      ela sai. Aqui o diário das três inscrições do escritório é lido ao vivo, cada publicação
+      é classificada com <b>as mesmas regras do painel Publicações DJEN</b> e confrontada com a
+      linha da planilha — sentença já proferida sem registro, recurso já julgado, trânsito em
+      julgado, publicação mais nova que a base. Nada é gravado sem o seu comando.
+    </div>
+    <div class="djbar">
+      <label>Período do diário
+        <select id="djPeriodo">
+          <option value="180">últimos 6 meses</option>
+          <option value="365" selected>últimos 12 meses</option>
+          <option value="730">últimos 24 meses</option>
+          <option value="1095">últimos 36 meses</option>
+        </select>
+      </label>
+      <button class="btn pri" id="btnCruzar">Cruzar com o DJEN</button>
+      <button class="btn" id="btnGravarDj" disabled>Gravar sentenças e recursos na planilha</button>
+      <button class="btn hide" id="btnXLSXDj">Exportar cruzamento</button>
+      <span class="djstatus" id="djStatus">Ainda não cruzado. A leitura de 12 meses leva
+        cerca de um minuto e roda no seu navegador.</span>
+    </div>
+    <div class="kpis" id="djKpis"></div>
+    <div id="djAviso" style="font-size:12px;color:var(--text-sub);margin:12px 0;line-height:1.55"></div>
+    <div class="djchips hide" id="djChips"></div>
+    <div class="tabwrap hide" id="djWrap">
+      <table id="tDjen"><thead id="djThead"></thead><tbody id="djTbody"></tbody></table>
+    </div>
+  </div>
+
   <div class="card">
     <h2>Carteira de processos <span id="tabInfo"></span></h2>
     <div id="avisoTram" style="font-size:12px;color:var(--text-sub);margin:-4px 0 10px"></div>
@@ -364,6 +415,9 @@
       <div class="ms" data-campo="recurso" data-rotulo="Recurso"></div>
       <div class="ms" data-campo="alvara" data-rotulo="Alvará"></div>
       <div class="ms" data-campo="faseCad" data-rotulo="Fase (cadastro)"></div>
+      <div class="ms hide" id="msDjDiag" data-campo="djDiag" data-rotulo="Cruzamento DJEN"></div>
+      <div class="ms hide" id="msDjSent" data-campo="djSentenca" data-rotulo="Sentença no diário"></div>
+      <div class="ms hide" id="msDjFase" data-campo="djFase" data-rotulo="Fase no diário"></div>
       <button class="btn" id="btnLimpar">Limpar filtros</button>
       <button class="btn" id="btnCSV">Exportar CSV</button>
       <button class="btn" id="btnXLSX">Exportar Excel</button>
@@ -579,6 +633,10 @@ async function carregar(){
     u.tipo = classificarTipoCNJ(u);
   }
   aplicarClientes();
+  /* A recarga automática reconstrói ROWS do zero e levaria o cruzamento junto:
+     sem isto, o painel apagaria sozinho o resultado da leitura do diário a
+     cada cinco minutos. */
+  if (DJ.rodou) aplicarCruzamento();
   render();
   /* Só depois de a tela existir: o painel abre rápido e se corrige sozinho
      quando o histórico de andamentos terminar de chegar. */
@@ -745,6 +803,7 @@ function render(){
   alertas();
   graficos();
   tabela();
+  if (DJ.rodou) renderDJEN();
   $('#fonteInfo').textContent = 'planilha "Processos [DataJud + DJEN]" · '+fmtN(ROWS.length)+' processos';
 }
 
@@ -993,7 +1052,9 @@ const COLUNAS_TAB = [
   ['produto','Produto jurídico'],['reu','Réu'],['tribunal','Trib.'],['grau','Inst.'],
   ['vara','Vara / órgão'],['fase','Fase'],['tramitacao','Status do processo'],['movimentacao','Movimentação'],['dias','Dias parado'],
   ['qtdMov','Mov.'],['qtdPub','Pub.'],['dtPub','Últ. publicação'],
-  ['sentenca','Sentença'],['recurso','Recurso'],['alvara','Alvará'],['ultMov','Última movimentação']
+  ['sentenca','Sentença'],['recurso','Recurso'],
+  ['djSentenca','Sentença no diário'],['djDiag','Cruzamento DJEN'],
+  ['alvara','Alvará'],['ultMov','Última movimentação']
 ];
 /* =====================================================================
    FILTROS DE SELEÇÃO MÚLTIPLA
@@ -1124,7 +1185,8 @@ function filtrar(){
     /* 'produto' precisa estar aqui: sem ele o chip registra a escolha e a
        tabela ignora, e o filtro de produto não filtra nada. */
     for (const campo of ['tipo','fase','tribunal','sentenca','recurso','produto',
-                         'alvara','faseCad','tramitacao','movimentacao']){
+                         'alvara','faseCad','tramitacao','movimentacao',
+                         'djDiag','djSentenca','djFase']){
       const sel = selecionados(campo);
       if (sel && !sel.has(String(r[campo]||''))) return false;
     }
@@ -1190,6 +1252,8 @@ function tabela(){
     '<td class="mono" style="white-space:nowrap">'+esc(r.dtPub||'—')+'</td>'+
     '<td>'+chipSent(r.sentenca)+'</td>'+
     '<td><span class="trunc" style="max-width:130px">'+esc(r.recurso||'—')+'</span></td>'+
+    '<td>'+(r.djSentenca?esc(r.djSentenca):'<span style="color:var(--text-muted)">—</span>')+'</td>'+
+    '<td>'+(r.djDiag&&r.djDiag!=='Sem publicação no período'?djChipDiag(r.djDiag):'<span style="color:var(--text-muted)">—</span>')+'</td>'+
     '<td><span class="trunc" style="max-width:150px">'+esc(r.alvara||'—')+'</span></td>'+
     '<td><span class="trunc">'+esc(r.ultMov||'—')+'</span></td>'+
     '</tr>').join('');
@@ -1250,6 +1314,21 @@ async function abrirDetalhe(linha){
     ln('Status de movimentação', r.movimentacao) +
     ln('Situação — coluna antiga da planilha', r.situacao + ' (mantida só para conferência; fundia as duas dimensões acima)') +
     ln('Resultado da sentença', r.sentenca) + ln('Resultado do recurso', r.recurso) +
+    (r.dj ? ln('— Leitura do diário (DJEN) —', ' ') +
+      ln('Sentença no diário', r.dj.sentenca
+          ? r.dj.sentenca.dispositivo + (r.dj.sentenca.parcial?' (em parte)':'') +
+            ' · ' + djBR(r.dj.sentenca.disp) + ' · leitura ' + r.dj.sentenca.confianca + '%'
+          : 'nenhuma sentença publicada no período lido') +
+      ln('Recurso no diário', r.dj.recurso
+          ? r.dj.recurso.dispositivo + (r.dj.recurso.parcial?' (em parte)':'') +
+            ' · ' + djBR(r.dj.recurso.disp) + ' · leitura ' + r.dj.recurso.confianca + '%'
+          : '') +
+      ln('Fase no diário', r.dj.ultimaDecisao ? r.dj.ultimaDecisao.fase : '') +
+      ln('Trânsito em julgado', r.dj.transitou ? 'registrado no diário' : '') +
+      ln('Condenação lida no texto', r.djCond ? fmtM(r.djCond) : '') +
+      ln('Publicações no período', fmtN(r.dj.pubs)) +
+      ln('Cruzamento', (r.djTodos||[]).join(' · ') || 'confere com a planilha')
+     : '') +
     ln('Situação do alvará', r.alvara) +
     ln('Dias sem movimentação', r.dias==null?'—':fmtN(r.dias)) +
     ln('Valor da causa', r.valor?fmtM(r.valor):'—') +
@@ -1568,11 +1647,950 @@ const SUGESTOES = [
  'Quais processos não retornaram dados nas fontes e precisam de correção de cadastro?'
 ];
 
+
+/* =====================================================================
+   CRUZAMENTO COM O DIÁRIO (DJEN)
+
+   As colunas "Resultado da Sentença" e "Resultado do Recurso" desta base são
+   cadastro manual — e cadastro manual atrasa. O DJEN publica a decisão no dia
+   em que ela sai. Este módulo lê o diário ao vivo pelas três inscrições do
+   escritório, classifica cada publicação e confronta com a linha da planilha.
+
+   IMPORTANTE — as regras de classificação abaixo são CÓPIA LITERAL do painel
+   Publicações DJEN (dashboard-djen/index.html), geradas por
+   scratchpad/djx_2_motor.py. Elas existem em dois lugares porque os painéis
+   são páginas independentes; se mudarem lá e não aqui, os dois passam a dar
+   respostas diferentes para a mesma publicação, que é justamente o defeito
+   que este cruzamento serve para expor.
+
+   A leitura do diário roda NO NAVEGADOR, de propósito: a API do DJEN recusa
+   chamadas vindas dos IPs do Google, então o Apps Script não consegue fazer
+   isto sozinho.
+   ===================================================================== */
+/* ---- inscricoes do escritorio (cópia literal do painel DJEN) ---- */
+const API_DJEN = 'https://comunicaapi.pje.jus.br/api/v1/comunicacao';
+const ABA_BASE = 'Base geral';
+
+/* As três inscrições do escritório. A descoberta de sufixos foi feita contra
+   uma janela de 180 dias: só a OAB pura retorna: -O, -A, -N e -E dão zero em
+   todas as três. Ficam registradas para reavaliação trimestral. */
+const OABS = [
+  { chave: 'BA41438',  n: '41438',  uf: 'BA', rotulo: 'OAB/BA 41.438' },
+  { chave: 'RJ271081', n: '271081', uf: 'RJ', rotulo: 'OAB/RJ 271.081' },
+  { chave: 'SP536843', n: '536843', uf: 'SP', rotulo: 'OAB/SP 536.843' }
+];
+
+/* ---- limpeza do inteiro teor (cópia literal do painel DJEN) ---- */
+const CAIXA_DEC = document.createElement('textarea');
+function limparHTML(bruto) {
+  let t = String(bruto || '');
+  if (!t) return '';
+  if (t.indexOf('<') >= 0) {
+    t = t.replace(/<(script|style|head)[^>]*>[\s\S]*?<\/(?:script|style|head)>/gi, ' ')
+         .replace(/<br\s*\/?>/gi, ' ')
+         .replace(/<\/(p|div|tr|li|h[1-6]|section|article|header|table|td|th)>/gi, ' ')
+         .replace(/<[^>]*>/g, ' ');
+  }
+  if (t.indexOf('&') >= 0) { CAIXA_DEC.innerHTML = t; t = CAIXA_DEC.value; }
+  return t.replace(/[ \s]+/g, ' ').trim();
+}
+
+/* ---- classificacao do ato (cópia literal do painel DJEN) ---- */
+const REGRAS_ATO = [
+  ['Sentença',              /\bsenten[çc]a\b|julgo\s+(?:parcialmente\s+)?(?:proced|improced)|extingo\s+o\s+processo/i, 90],
+  ['Acórdão',               /ac[óo]rd[ãa]o|dou\s+provimento|nego\s+provimento|turma\s+recursal/i, 85],
+  ['Decisão interlocutória',/defiro\s+a?\s*(?:tutela|liminar)|indefiro\s+a?\s*(?:tutela|liminar)|decis[ãa]o\s+interlocut/i, 85],
+  ['Intimação para audiência', /audi[êe]ncia\s+(?:de\s+)?(?:concilia|instru|julgamento)|designo\s+audi[êe]ncia|pauta\s+de\s+julgamento/i, 88],
+  ['Intimação para manifestação', /manifeste-se|intime-se\s+.*para\s+manifesta|diga\s+a\s+parte|impugna[çc][ãa]o/i, 80],
+  ['Citação',               /\bcite-se\b|cita[çc][ãa]o\b/i, 85],
+  ['Alvará',                /alvar[áa]/i, 90],
+  ['Arquivamento',          /arquiv|baixa\s+definitiva/i, 88],
+  ['Edital',                /edital/i, 70],
+  ['Despacho',              /despacho|\bcumpra-se\b/i, 60],
+  ['Ato ordinatório',       /ato\s+ordinat/i, 75]
+];
+
+/* Prazos usuais. Vale como sugestão: a peça e o rito mudam o número, por isso
+   a confiança cai quando o texto não traz o prazo escrito. */
+const REGRAS_PRAZO = [
+  [/prazo\s+de\s+(\d{1,2})\s*\(?\s*\w*\s*\)?\s*dias?\s+[úu]teis/i, 'úteis'],
+  [/prazo\s+de\s+(\d{1,2})\s*dias?/i, 'úteis'],
+  [/(\d{1,2})\s*dias?\s+[úu]teis/i, 'úteis']
+];
+
+/* Quando o texto não decide, o rótulo que o próprio tribunal anexou à
+   comunicação ainda diz muita coisa. Vale menos que a leitura do dispositivo
+   — por isso entra com confiança menor —, mas é melhor que "não classificado",
+   que empurra para a triagem manual algo que o diário já nomeou. */
+const REGRAS_DOC = [
+  ['Distribuição',            /distribui/, 72],
+  ['Acórdão',                 /ementa|ac[oó]rd/, 70],
+  ['Decisão interlocutória',  /decis[aã]o\s+monocr/, 70],
+  ['Decisão interlocutória',  /^decis/, 65],
+  ['Intimação para audiência',/pauta/, 75],
+  ['Certidão',                /certid/, 70],
+  ['Intimação em recurso',    /agravo|apela[cç]|recurso|embargos/, 68],
+  ['Conclusão',               /conclus/, 70],
+  ['Informação',              /informa[cç]/, 60],
+  ['Intimação',               /^intima|^ato\s|^outros$|^\d+$/, 45]
+];
+
+/* Publicação sigilosa não traz o inteiro teor: o DJEN devolve apenas o aviso
+   de sigilo. Classificar isso como "não classificado" esconde o problema real,
+   que é a impossibilidade de ler — e leitura nos autos é obrigatória. */
+const RE_SIGILO = /processo\s+sigiloso|segredo\s+de\s+justi[cç]a|consulte\s+os\s+autos\s+digitais/i;
+
+function nrmDoc(s) {
+  return String(s || '').toLowerCase()
+    .normalize('NFD').replace(/[̀-ͯ]/g, '').trim();
+}
+
+/* ---- produto juridico deduzido (cópia literal do painel DJEN) ---- */
+/* --------------------------------------------------- produto jurídico
+   O produto está CADASTRADO na planilha Clientes e Processos e é lido de lá
+   (ver lerClientes). Estas regras são só a retaguarda para o processo que
+   ainda não tem cadastro: deduzem pelo assunto do CNJ e devolvem exatamente
+   os mesmos nomes do cadastro — senão o ranking por produto sairia partido
+   entre duas grafias da mesma tese. A ficha marca o que veio por dedução. */
+const REGRAS_PRODUTO = [
+  ['Fornecimento de CBD (Abins)',      /sem registro na anvisa|anvisa|canabidiol|cbd/],
+  ['Rev. Plano de Saúde',              /reajuste contratual|plano de saude|planos de saude|seguro saude|seguro de saude/],
+  ['Neg. Procedimento Médico (TEA)',   /transtorno do espectro|autis|\btea\b|aba\b|terapia multidisciplinar/],
+  ['Neg. Procedimento Médico (Geral)', /tratamento medico|fornecimento de medicament|home care|internacao|procedimento cirurgico|erro medico|orteses|proteses/],
+  ['Superendividamento',               /superendivid/],
+  ['Rev. Financiamento Imobiliário',   /financiamento imobiliario|sistema financeiro de habitacao|\bsfh\b|alienacao fiduciaria de imovel/],
+  ['Rev. Financiamento Veicular',      /financiamento de veiculo|arrendamento mercantil|leasing|busca e apreensao/],
+  ['Rev. Contrato Bancário PF',        /contratos bancarios|interpretacao \/ revisao de contrato|revisao de contrato|clausulas abusivas|revisao do saldo|juros remunerat|anatocismo|emprestimo consignado|cedula de credito|financiamento/],
+  ['RMC/RCC',                          /reserva de margem consignavel|\brmc\b|\brcc\b|cartao consignado/],
+  ['Restituição do ITIV',              /itbi|itiv|imposto de transmissao/],
+  ['Isenção do IR por Doenças Graves', /imposto de renda|irpf|isencao.{0,25}doenca/],
+  ['Aéreo (Cancelamento de voo, overbooking, extravio de bagagem etc)',
+                                       /transporte aereo|cancelamento de voo|overbooking|extravio de bagagem|atraso de voo/],
+  ['Reclamação Trabalhista',           /reclamacao trabalhista|verbas rescisorias|vinculo empregaticio/],
+  ['Negativação Indevida',             /inclusao indevida|cadastro de inadimplentes|protesto indevido|negativacao/],
+  ['Outros Assuntos',                  /praticas abusivas|dano moral|dano material|obrigacao de fazer|repeticao do indebito|acidente de transito|condominio|telefonia|energia eletrica/]
+];
+function produtoDe(assunto, classe) {
+  const a = (nrmDoc(assunto) + ' ' + nrmDoc(classe)).trim();
+  if (!a) return 'Não identificado';
+  for (const [nome, re] of REGRAS_PRODUTO) if (re.test(a)) return nome;
+  return 'Outros Assuntos';
+}
+
+/* ---- grau e especie do recurso (cópia literal do painel DJEN) ---- */
+/* ------------------------------------------------------ tipo de recurso
+   O pedido é ver acórdão separado por apelação, agravo e demais recursos.
+   A classe processual nomeia isso melhor que o texto, então ela vem antes. */
+const REGRAS_RECURSO = [
+  ['Embargos de declaração',        /embargos de declara/],
+  ['Agravo interno',                /agravo interno|agravo regimental/],
+  ['Agravo de instrumento',         /agravo de instrumento/],
+  ['Recurso especial/extraordinário', /recurso especial|recurso extraordinario|agravo em recurso especial/],
+  ['Apelação',                      /apelacao/],
+  ['Recurso inominado',             /recurso inominado/],
+  ['Embargos infringentes',         /embargos infringentes/],
+  ['Agravo',                        /\bagravo\b/]
+];
+/* Só a classe processual. O texto de uma decisão cita recursos o tempo todo
+   ("caberá apelação", "mantida a sentença", "nos termos do agravo"), e usá-lo
+   fazia sentença de primeiro grau ser rotulada como apelação. */
+function tipoRecursoDe(classe) {
+  const c = nrmDoc(classe);
+  if (!c) return null;
+  for (const [nome, re] of REGRAS_RECURSO) if (re.test(c)) return nome;
+  return null;
+}
+
+/* Órgão julgador de segundo grau. Câmara, turma, seção e relator não existem
+   em primeiro grau — e a vara, que existe, nunca casa com estes termos. */
+const RE_ORGAO_2G = /c[âa]mara|turma\s+recursal|turma\s+c[íi]vel|turma\s+julgadora|\bturma\b|se[çc][ãa]o\s+(?:c[íi]vel|especializada)|[óo]rg[ãa]o\s+especial|desembargador|relator|colegiado|corte\s+especial|vice-?presid|presid[êe]ncia\s+do\s+tribunal|gabinete\s+do\s+des/i;
+
+/* Últimos quatro dígitos do CNJ são a unidade de origem: 0000 é processo
+   originário do tribunal e 9000 é órgão de 2º grau dos juizados. Nenhum dos
+   dois é de primeiro grau, então nenhum dos dois produz sentença. */
+function origemDeSegundoGrau(numero) {
+  const d = String(numero || '').replace(/\D/g, '');
+  if (d.length !== 20) return false;
+  const o = d.slice(16);
+  return o === '0000' || o === '9000';
+}
+
+/* Grau em que a decisão foi proferida, por três sinais independentes e
+   nenhum deles vindo do texto. */
+function ehSegundoGrau(p) {
+  if (tipoRecursoDe(p.classe)) return true;
+  if (RE_ORGAO_2G.test(String(p.orgao || ''))) return true;
+  if (origemDeSegundoGrau(p.processo)) return true;
+  return false;
+}
+
+/* ---- dispositivo e valores (cópia literal do painel DJEN) ---- */
+/* -------------------------------------------------------- dispositivo
+   O rollup favorável/desfavorável responde "ganhou ou perdeu"; para decidir
+   estratégia é preciso saber *o quê* — improcedência e extinção sem mérito
+   pesam diferente, e acordo homologado não é derrota nem vitória plena. */
+const REGRAS_DISPOSITIVO = [
+  /* Ancoradas no verbo do dispositivo. "improcedência" solta aparece em citação
+     de jurisprudência e em alegação afastada — contar isso como derrota
+     inverte o índice. "procedente em parte" é a forma mais comum do parcial. */
+  ['Parcialmente procedente',     /parcialmente\s+proced|\bproced[êe]ncia\s+parcial|proceden\w*\s+em\s+parte|em\s+parte\s+proceden|julgo\s+proceden\w*\s+em\s+parte/i, 'Parcial'],
+  ['Improcedente',                /julg\w+\s+(?:totalmente\s+)?improcedente|improcedentes?\s+os?\s+pedidos?|improced[êe]ncia\s+d[oa]s?\s+pedid|pedidos?\s+.{0,20}improcedentes?/i, 'Desfavorável'],
+  ['Procedente',                  /julg\w+\s+(?:totalmente\s+)?procedente|\bprocedentes?\s+os?\s+pedidos?|\bproced[êe]ncia\s+d[oa]s?\s+pedid|pedidos?\s+.{0,20}\bprocedentes?\b/i, 'Favorável'],
+  ['Acordo homologado',           /homolog\w*\s+(?:o\s+|a\s+)?(?:acordo|transa[çc][ãa]o)|acordo\s+[^.]{0,30}homolog/i,  'Favorável'],
+  ['Extinção do processo',        /extin[çc]\w+\s+d[oa]\s+(?:processo|feito)|julgo\s+extint|extingo\s+o\s+(?:processo|feito)|art\.?\s*485/i, 'Neutro'],
+  ['Recurso parcialmente provido',/parcial\s+provimento|provimento\s+parcial|provejo\s+parcialmente|acolho\s+(?:parcialmente|em\s+parte)\s+(?:os\s+)?embargos/i, 'Parcial'],
+  ['Recurso não provido',         /nego\s+provimento|negar\s+provimento|improvido|desprovi|nego\s+seguimento|mantida\s+a\s+senten|rejeito\s+(?:os\s+)?embargos|desacolho\s+(?:os\s+)?embargos/i, 'Desfavorável'],
+  ['Recurso provido',             /\bdou\s+provimento|\bdar\s+provimento|d[êe]-se\s+provimento|provimento\s+ao\s+recurso|reformo\s+a\s+senten|acolho\s+(?:os\s+)?embargos/i, 'Favorável'],
+  /* "pedido" sozinho não serve: "defiro o pedido de dilação de prazo" e
+     "defiro o pedido de gratuidade" não são liminar, e estavam entrando como
+     resultado favorável. Exige-se a palavra que caracteriza a tutela. */
+  ['Liminar deferida',            /\b(?:defiro|concedo)\s+(?:parcialmente\s+)?(?:a\s+|o\s+)?(?:tutela|liminar|antecipa[çc][ãa]o|medida\s+liminar|pedido\s+liminar|pedido\s+de\s+tutela|seguran[çc]a)/i, 'Favorável'],
+  ['Liminar indeferida',          /\b(?:indefiro|denego)\s+(?:a\s+|o\s+)?(?:tutela|liminar|antecipa[çc][ãa]o|medida\s+liminar|pedido\s+liminar|pedido\s+de\s+tutela|seguran[çc]a)/i, 'Desfavorável']
+];
+
+/* Dispositivo de embargos: o verbo decidindo os embargos, não a menção a eles.
+   "Cabem embargos de declaração no prazo de 5 dias" aparece no rodapé de quase
+   toda sentença — usar menção levaria a sentença inteira para a coluna errada. */
+const RE_DISP_EMBARGOS = /(?:acolho|rejeito|desacolho|conhe[çc]o|nego\s+provimento\s+a)o?s?\s+(?:parcialmente\s+|em\s+parte\s+)?(?:d?os\s+)?embargos\s+de\s+declara/i;
+
+/* Cada fase só admite os dispositivos que ela própria pode produzir. Isto é
+   restrição, não ordem de preferência: uma sentença de primeiro grau que
+   escreve "confirmo a tutela" ou cita "nego provimento aos embargos" não
+   decidiu liminar nem recurso, e emprestar esse rótulo inventaria um resultado
+   que ninguém proferiu.
+
+   Sentença resolve o mérito. Recurso decide o recurso. Liminar defere ou
+   indefere. Sem dispositivo da própria fase no texto, a publicação fica "Sem
+   dispositivo" e sai da análise — é o que a leitura de fato permite afirmar. */
+const ORDEM_DISP = {
+  'Sentença': ['Parcialmente procedente', 'Improcedente', 'Procedente',
+               'Acordo homologado', 'Extinção do processo'],
+  'Recurso':  ['Recurso parcialmente provido', 'Recurso não provido', 'Recurso provido',
+               'Acordo homologado'],
+  'Liminar':  ['Liminar deferida', 'Liminar indeferida'],
+  /* Despacho, ato ordinatório e afins não têm fase própria; ali qualquer
+     dispositivo escrito no texto vale, porque é o único sinal que existe. */
+  'padrao':   ['Parcialmente procedente', 'Improcedente', 'Procedente', 'Acordo homologado',
+               'Extinção do processo', 'Recurso parcialmente provido', 'Recurso não provido',
+               'Recurso provido', 'Liminar deferida', 'Liminar indeferida']
+};
+/* Procedência parcial é procedência: o pedido foi acolhido, e a extensão do
+   acolhimento é outra conversa. Vira um dispositivo só; que foi em parte fica
+   registrado em `parcial`, para a ficha e para o log da planilha. */
+const FUNDE_DISPOSITIVO = { 'Parcialmente procedente': 'Procedente' };
+
+function dispositivoDe(t, julgamento) {
+  const ordem = ORDEM_DISP[julgamento] || ORDEM_DISP.padrao;
+  for (const nome of ordem) {
+    const r = REGRAS_DISPOSITIVO.find(x => x[0] === nome);
+    if (!r || !r[1].test(t)) continue;
+    const fundido = FUNDE_DISPOSITIVO[r[0]];
+    return { dispositivo: fundido || r[0],
+             resultado: fundido ? 'Favorável' : r[2],
+             parcial: !!fundido };
+  }
+  return { dispositivo: 'Sem dispositivo', resultado: 'Não aplicável', parcial: false };
+}
+
+/* ------------------------------------------------------------- valores
+   Uma decisão cita muitos reais: causa, custas, honorários, multa e a
+   condenação em si. Somar tudo daria um número sem sentido, então cada valor
+   é classificado pelo que estiver escrito imediatamente antes dele. */
+const REGRAS_VALOR = [
+  /* Bloqueio vem primeiro: SISBAJUD e penhora citam cifras altíssimas que não
+     são receita do escritório nem condenação a executar — são constrição na
+     conta da parte adversa, e um único bloqueio milionário distorce a carteira
+     inteira se for lido como condenação. */
+  ['Bloqueio/penhora', /sisbajud|bacenjud|renajud|penhora|bloqueio|bloquei|arresto|indisponibilidade/],
+  ['Honorários',     /honorarios/],
+  ['Custas',         /custas|despesas processuais|preparo|porte de remessa/],
+  ['Multa',          /multa|astreinte/],
+  ['Valor da causa', /valor da causa|valor atribuido a causa/],
+  ['Alvará/RPV',     /alvara|rpv|requisicao de pequeno valor|precatorio|levantamento/],
+  ['Depósito',       /deposito/],
+  ['Condenação',     /conden|indeniz|danos? mor|danos? mat|reparacao|ressarci|restitui|repeticao do indebito|a titulo de|pagamento d[ao]/]
+];
+function extrairValores(t) {
+  const out = [];
+  const re = /R\$\s*([\d.]{1,18},\d{2})/g;
+  let m;
+  while ((m = re.exec(t)) !== null && out.length < 40) {
+    const v = Number(m[1].replace(/\./g, '').replace(',', '.'));
+    if (!isFinite(v) || v <= 0) continue;
+    const ctx = nrmDoc(t.slice(Math.max(0, m.index - 170), m.index));
+    let tipo = 'Não identificado';
+    for (const [nome, rx] of REGRAS_VALOR) if (rx.test(ctx)) { tipo = nome; break; }
+    out.push({ tipo, valor: v,
+               trecho: t.slice(Math.max(0, m.index - 120), m.index + 70).trim() });
+  }
+  return out;
+}
+/* Soma só os valores DISTINTOS de condenação: o mesmo número costuma aparecer
+   três ou quatro vezes na mesma decisão (dispositivo, correção, dispositivo
+   final), e somar repetição infla a carteira a executar. */
+function somaCondenacao(valores) {
+  const vistos = new Set();
+  let s = 0;
+  for (const v of valores) {
+    if (v.tipo !== 'Condenação' || vistos.has(v.valor)) continue;
+    vistos.add(v.valor);
+    s += v.valor;
+  }
+  return s;
+}
+
+/* ---- classificador (cópia literal do painel DJEN) ---- */
+function classificar(p) {
+  const t = (p.texto || '') + ' ' + (p.tipoComunicacao || '') + ' ' + (p.tipoDocumento || '');
+  let ato = 'Não classificado', conf = 30;
+  for (const [nome, re, c] of REGRAS_ATO) if (re.test(t)) { ato = nome; conf = c; break; }
+
+  /* Sigilo tem precedência: sem inteiro teor, qualquer leitura seria chute. */
+  const semTexto = RE_SIGILO.test(p.texto || '') && String(p.texto || '').length < 400;
+  if (semTexto) { ato = 'Sigiloso'; conf = 40; }
+  else if (ato === 'Não classificado') {
+    const rots = [nrmDoc(p.tipoDocumento), nrmDoc(p.tipoComunicacao)].filter(Boolean);
+    /* Duas passadas: primeiro só as regras específicas em ambos os rótulos,
+       depois a genérica. Sem isso, um tipoDocumento "Outros" venceria um
+       tipoComunicacao "Lista de distribuição", que é o que de fato informa. */
+    for (const rot of rots) {
+      for (const [nome, re, c] of REGRAS_DOC) {
+        if (nome === 'Intimação') break;
+        if (re.test(rot)) { ato = nome; conf = c; break; }
+      }
+      if (ato !== 'Não classificado') break;
+    }
+    if (ato === 'Não classificado') {
+      const gen = REGRAS_DOC[REGRAS_DOC.length - 1];
+      for (const rot of rots) if (gen[1].test(rot)) { ato = gen[0]; conf = gen[2]; break; }
+    }
+  }
+
+  /* Julgamento: sentença, recurso ou liminar. O GRAU decide antes do ato —
+     sentença é, por definição, a de primeiro grau. Um acórdão que mantém a
+     sentença recorrida escreve "sentença" em quase toda linha, e deixar o
+     texto mandar aqui produzia "Sentença" dentro de agravo de instrumento. */
+  const recurso = tipoRecursoDe(p.classe);
+
+  /* Embargos de declaração não julgam o pedido: integram o julgado, e o CPC
+     os arrola como recurso (art. 994, IV). Decididos pelo mesmo juiz em
+     primeiro grau, a classe processual continua sendo a da ação — por isso a
+     detecção é pelo dispositivo, e não pela classe nem por menção solta:
+     sentença cita "cabem embargos de declaração" no rodapé o tempo todo. */
+  const ehEmbargos = (!!recurso && /embargos/i.test(recurso)) ||
+    /embargos\s+de\s+declara/i.test(String(p.tipoDocumento || '')) ||
+    RE_DISP_EMBARGOS.test(p.texto || '');
+
+  const segundoGrau = ehSegundoGrau(p) || ehEmbargos;
+  const julgamento = (ato === 'Decisão interlocutória' && !ehEmbargos) ? 'Liminar'
+                   : segundoGrau ? 'Recurso'
+                   : ato === 'Sentença' ? 'Sentença'
+                   : ato === 'Acórdão' ? 'Recurso'
+                   : 'Outros atos';
+
+  /* Fase em espécie. Apelação devolve o mérito inteiro, agravo de instrumento
+     decide uma questão incidental e embargos de declaração só integram o
+     julgado — chamar os três de "recurso" e tirar a média não orienta nenhum
+     deles. Recurso sem classe identificável fica em "Outros recursos" em vez
+     de ser adivinhado pelo texto. */
+  /* Recurso inominado é a apelação do Juizado Especial: mesma função, devolve
+     o mérito inteiro ao colegiado. Como fase, são a mesma pergunta. A espécie
+     exata permanece em `recurso`, para a tabela de acórdãos e a exportação. */
+  const FASE_EQUIVALENTE = { 'Apelação': 'Apelação / Rec. inominado',
+                             'Recurso inominado': 'Apelação / Rec. inominado' };
+  const fase = julgamento === 'Recurso'
+    ? (ehEmbargos ? 'Embargos de declaração'
+                  : (FASE_EQUIVALENTE[recurso] || recurso || 'Outros recursos'))
+    : julgamento;
+
+  /* Dispositivo: só se afirma quando aparece escrito no texto. */
+  const d = dispositivoDe(t, julgamento);
+  let resultado = d.resultado;
+  let detalhe = d.dispositivo === 'Sem dispositivo' ? ''
+              : (d.parcial ? d.dispositivo + ' em parte' : d.dispositivo);
+  let dispositivo = d.dispositivo;
+  const parcial = d.parcial;
+  const transitou = /tr[âa]nsit\w+\s+em\s+julgado/i.test(t);
+
+  let prazoDias = null, contagem = 'úteis';
+  for (const [re, c] of REGRAS_PRAZO) {
+    const m = re.exec(t);
+    if (m) { prazoDias = Number(m[1]); contagem = c; break; }
+  }
+  const exigePrazo = prazoDias !== null ||
+    /Intimação para manifestação|Citação/.test(ato) ||
+    (ato === 'Sentença' && resultado === 'Desfavorável');
+  if (exigePrazo && prazoDias === null) { prazoDias = 15; conf = Math.min(conf, 55); }
+
+  /* Dinheiro, separado por natureza. */
+  const valores = semTexto ? [] : extrairValores(p.texto || '');
+  const condenacao = somaCondenacao(valores);
+  const temValor = valores.length > 0 ||
+    /alvar[áa]|honor[áa]rios|custas|multa|dep[óo]sito\s+judicial|RPV|precat[óo]rio/i.test(t);
+  const valor = valores.length ? valores[0].valor : null;
+
+  if (semTexto) {
+    resultado = 'Não aplicável';
+    dispositivo = 'Sem dispositivo';
+    detalhe = 'sigiloso — leitura obrigatória nos autos';
+  }
+  return { ato, julgamento, fase, recurso, segundoGrau, dispositivo, resultado, detalhe, parcial, transitou,
+           prazoDias, contagem, exigePrazo,
+           confianca: conf, temValor: semTexto ? false : temValor,
+           valor: semTexto ? null : valor, valores, condenacao, semTexto };
+}
+
+/* ---- chamada a API do diario (cópia literal do painel DJEN) ---- */
+const TENTATIVAS_DJEN = 4;
+const esperar = ms => new Promise(r => setTimeout(r, ms));
+
+async function chamarDJEN(oab, ini, fim, pagina) {
+  const p = new URLSearchParams({
+    numeroOab: oab.n, ufOab: oab.uf,
+    dataDisponibilizacaoInicio: ini, dataDisponibilizacaoFim: fim,
+    pagina: String(pagina), itensPorPagina: '50'   // acima de 50 a API devolve items vazio
+  });
+  const t0 = Date.now();
+  let ultimo = { ok: false, http: 0, count: 0, itens: [], erro: 'sem resposta' };
+
+  for (let tent = 1; tent <= TENTATIVAS_DJEN; tent++) {
+    try {
+      const r = await fetch(API_DJEN + '?' + p, { cache: 'no-store' });
+      if (r.ok) {
+        const corpo = await r.json();
+        return { ok: true, http: r.status, ms: Date.now() - t0, tentativas: tent,
+                 count: corpo ? corpo.count : 0, itens: (corpo && corpo.items) || [] };
+      }
+      ultimo = { ok: false, http: r.status, count: 0, itens: [], erro: 'HTTP ' + r.status };
+      if (r.status < 500 && r.status !== 429) break;   // 4xx não melhora com espera
+    } catch (e) {
+      ultimo = { ok: false, http: 0, count: 0, itens: [], erro: e.message };
+    }
+    if (tent < TENTATIVAS_DJEN) await esperar(700 * tent);
+  }
+  return Object.assign(ultimo, { ms: Date.now() - t0, tentativas: TENTATIVAS_DJEN });
+}
+
+
+/* Estado do cruzamento. Vive fora de ROWS porque ROWS é reconstruído a cada
+   recarga automática da planilha (5 min) e levaria o cruzamento junto. */
+let DJ = { rodou:false, rodando:false, pubs:[], porProc:new Map(), fora:[],
+           janela:'', falhas:0, quando:null, dias:365 };
+let DJ_FILTRO = '';
+
+const djISO = d => d ? new Date(d.getTime() - d.getTimezoneOffset()*60000)
+                        .toISOString().slice(0,10) : '';
+const djBR  = d => d ? String(d.getDate()).padStart(2,'0') + '/' +
+                       String(d.getMonth()+1).padStart(2,'0') + '/' + d.getFullYear() : '';
+/* O DJEN devolve a data como 'AAAA-MM-DD'. new Date('2026-03-01') seria UTC e
+   voltaria um dia no fuso do Brasil — daí a construção por partes. */
+function djData(txt){
+  const m = String(txt||'').match(/^(\d{4})-(\d{2})-(\d{2})/);
+  return m ? new Date(+m[1], +m[2]-1, +m[3]) : null;
+}
+
+/* Confiança da LEITURA DO DISPOSITIVO — que não é a confiança geral do
+   classificador. Aquela cai para 55% quando o texto não traz prazo escrito,
+   regra da fila de prazos do painel DJEN; ela mede se dá para agendar um
+   prazo, e não se dá para afirmar o resultado. Reaproveitá-la aqui retinha
+   toda sentença de improcedência (numa leitura de 45 dias, 20 delas), que é
+   justamente o registro que mais atrasa no cadastro.
+
+   O que sustenta a leitura do resultado é outra coisa: o dispositivo só é
+   afirmado quando um VERBO ANCORADO aparece no texto ("julgo improcedente",
+   "nego provimento") e apenas entre os dispositivos que aquela fase pode
+   produzir — ORDEM_DISP não deixa uma sentença herdar dispositivo de recurso.
+   Dentro de sentença ou recurso isso é leitura firme; num despacho, onde
+   qualquer dispositivo escrito vale, é indício. */
+function confDispositivo(cls){
+  if (cls.dispositivo === 'Sem dispositivo' || cls.semTexto) return 0;
+  return (cls.julgamento === 'Sentença' || cls.julgamento === 'Recurso') ? 90 : 60;
+}
+
+/* Uma publicação reduzida ao que o cruzamento usa. */
+function pubDJ(it){
+  const texto = limparHTML(it.texto);
+  const numero = String(it.numeroprocessocommascara || it.numero_processo || '');
+  const cls = classificar({ texto: texto, classe: String(it.nomeClasse||''),
+    orgao: String(it.nomeOrgao||''), processo: numero,
+    tipoComunicacao: it.tipoComunicacao, tipoDocumento: it.tipoDocumento });
+  /* Os dois campos do DJEN trazem o mesmo número; vale o que tiver 20 dígitos. */
+  const d1 = String(it.numero_processo||'').replace(/\D/g,'');
+  const d2 = numero.replace(/\D/g,'');
+  return {
+    id: String(it.id), hash: String(it.hash||''),
+    numero: numero, digitos: d1.length === 20 ? d1 : d2,
+    tribunal: String(it.siglaTribunal||'—'), orgao: String(it.nomeOrgao||''),
+    classe: String(it.nomeClasse||''), texto: texto,
+    disp: djData(it.data_disponibilizacao),
+    cancelada: String(it.status||'').toUpperCase() === 'C' ||
+               !!it.data_cancelamento || it.ativo === false,
+    ato: cls.ato, julgamento: cls.julgamento, fase: cls.fase, recurso: cls.recurso,
+    dispositivo: cls.dispositivo, resultado: cls.resultado, parcial: cls.parcial,
+    transitou: cls.transitou, condenacao: cls.condenacao,
+    confianca: confDispositivo(cls), confiancaAto: cls.confianca,
+    produto: produtoDe('', String(it.nomeClasse||''))
+  };
+}
+
+async function coletarDJEN(dias, aoProgredir){
+  const fim = new Date(), ini = new Date();
+  ini.setDate(ini.getDate() - dias);
+  const a = djISO(ini), b = djISO(fim);
+  const porId = new Map();
+  let falhas = 0;
+
+  for (const oab of OABS){
+    const primeira = await chamarDJEN(oab, a, b, 1);
+    if (!primeira.ok) falhas++;
+    const paginas = Math.max(1, Math.ceil((primeira.count||0)/50));
+    const pendentes = [];
+    let lote = primeira.itens;
+
+    for (let pg = 1; pg <= paginas; pg++){
+      if (pg > 1){
+        await esperar(450);                 // rajada gera 500 e furo silencioso
+        const r = await chamarDJEN(oab, a, b, pg);
+        /* Página que falhou não interrompe as demais: perder 50 publicações é
+           muito melhor que perder as 4.700 seguintes. */
+        if (!r.ok){ falhas++; pendentes.push(pg); continue; }
+        lote = r.itens;
+      }
+      for (const it of lote){
+        const id = String(it.id);
+        if (!porId.has(id)) porId.set(id, pubDJ(it));
+      }
+      aoProgredir(oab.rotulo, pg, paginas, porId.size);
+    }
+
+    /* Repescagem: as falhas do DJEN duram segundos e a mesma página costuma
+       responder logo depois. */
+    for (const pg of pendentes){
+      await esperar(1200);
+      const r = await chamarDJEN(oab, a, b, pg);
+      if (!r.ok) continue;
+      falhas--;
+      for (const it of r.itens){
+        const id = String(it.id);
+        if (!porId.has(id)) porId.set(id, pubDJ(it));
+      }
+      aoProgredir(oab.rotulo + ' — repescando', pg, paginas, porId.size);
+    }
+    await esperar(300);
+  }
+  return { pubs: [...porId.values()], falhas: falhas, janela: a + ' a ' + b };
+}
+
+/* Um registro por processo, guardando a decisão MAIS RECENTE de cada espécie.
+   Sentença antiga não desfaz acórdão novo, e vice-versa. */
+function agruparDJEN(pubs){
+  const M = new Map();
+  const maisNova = (a, b) => !a || (b.disp && (!a.disp || b.disp > a.disp));
+  for (const p of pubs){
+    if (p.cancelada || p.digitos.length !== 20) continue;
+    let r = M.get(p.digitos);
+    if (!r){
+      r = { digitos:p.digitos, numero:p.numero, tribunal:p.tribunal, classe:p.classe,
+            orgao:p.orgao, produto:p.produto, pubs:0, ultima:null, sentenca:null,
+            recurso:null, liminar:null, ultimaDecisao:null, transitou:false, condenacao:0 };
+      M.set(p.digitos, r);
+    }
+    r.pubs++;
+    if (p.disp && (!r.ultima || p.disp > r.ultima)) r.ultima = p.disp;
+    if (p.transitou) r.transitou = true;
+    if (p.condenacao > r.condenacao) r.condenacao = p.condenacao;
+    if (p.dispositivo === 'Sem dispositivo') continue;
+    if (p.julgamento === 'Sentença' && maisNova(r.sentenca, p)) r.sentenca = p;
+    if (p.julgamento === 'Recurso'  && maisNova(r.recurso,  p)) r.recurso  = p;
+    if (p.julgamento === 'Liminar'  && maisNova(r.liminar,  p)) r.liminar  = p;
+    if (maisNova(r.ultimaDecisao, p)) r.ultimaDecisao = p;
+  }
+  return M;
+}
+
+/* ------------------------------------------------------- confronto
+   O vocabulário do diário e o da planilha são diferentes para a mesma coisa.
+   Esta tabela é a MESMA do Apps Script (valorSentenca_/valorRecurso_): se
+   divergir, o painel apontaria divergência onde a gravação não muda nada. */
+const DJ_SENT_EQ = { 'Procedente':'Procedência', 'Improcedente':'Improcedência',
+                     'Extinção do processo':'Extinção do Processo',
+                     'Acordo homologado':'Acordo Homologado' };
+const DJ_REC_EQ  = { 'Recurso provido':'Provido', 'Recurso parcialmente provido':'Provido',
+                     'Recurso não provido':'Não Provido' };
+/* Códigos compactos aceitos pelo Web App — o payload viaja na URL. */
+const DJ_COD = { 'Procedente':['P','S'], 'Improcedente':['I','S'],
+                 'Extinção do processo':['E','S'], 'Acordo homologado':['A','S'],
+                 'Recurso provido':['V','R'], 'Recurso parcialmente provido':['W','R'],
+                 'Recurso não provido':['N','R'] };
+/* Escrever na base a partir de leitura heurística exige limiar: um dispositivo
+   lido a 55% é palpite, e palpite gravado vira dado falso que ninguém mais
+   questiona. Mesmo número do Apps Script (CONF_MINIMA_RESULTADO). */
+const DJ_CONF_MIN = 80;
+
+/* "Vazio" para efeito de comparação — espelha podeGravarSentenca_ e
+   podeGravarRecurso_ do Apps Script. Valor posto por gente nunca é vazio. */
+const djVazioSent = t => { const k = nrm(t); return !k || k.indexOf('nao sentenciado') === 0; };
+const djVazioRec  = t => { const k = nrm(t);
+  return !k || k.indexOf('nao houve recurso') === 0 || k.indexOf('aguardando julgamento') === 0; };
+
+/* Ordem = gravidade. O que o escritório perde dinheiro por não saber vem antes. */
+/* Atraso de publicação não é pendência de resultado: é um fato único — a
+   sincronização da planilha está atrás do diário — repetido em quase todo
+   processo. Contá-lo como pendência enterra as sentenças e os recursos sem
+   registro, que são o que exige ação processo a processo. */
+const DJ_SO_ATRASO = 'Publicação mais nova que a base';
+
+const DJ_DIAGS = [
+  ['Sentença não registrada',          'var(--danger)'],
+  ['Sentença divergente',              'var(--danger)'],
+  ['Recurso não registrado',           'var(--warning)'],
+  ['Recurso divergente',               'var(--warning)'],
+  ['Trânsito em julgado no diário',    'var(--info)'],
+  ['Publicação mais nova que a base',  'var(--neutral)'],
+  ['Confere',                          'var(--green)'],
+  ['Sem publicação no período',        'var(--text-muted)']
+];
+const djCorDiag = d => (DJ_DIAGS.find(x => x[0] === d) || [null,'var(--neutral)'])[1];
+
+function diagnosticar(r){
+  const d = r.dj;
+  if (!d) return { diag:'Sem publicação no período', todos:[] };
+  const achados = [];
+
+  if (d.sentenca && DJ_SENT_EQ[d.sentenca.dispositivo]){
+    const lido = DJ_SENT_EQ[d.sentenca.dispositivo];
+    if (djVazioSent(r.sentenca)) achados.push('Sentença não registrada');
+    else if (nrm(r.sentenca) !== nrm(lido)) achados.push('Sentença divergente');
+  }
+  if (d.recurso && DJ_REC_EQ[d.recurso.dispositivo]){
+    const lido = DJ_REC_EQ[d.recurso.dispositivo];
+    if (djVazioRec(r.recurso)) achados.push('Recurso não registrado');
+    else if (nrm(r.recurso) !== nrm(lido)) achados.push('Recurso divergente');
+  }
+  /* Trânsito em julgado só interessa enquanto o processo não foi baixado: em
+     arquivado definitivo é história, não pendência. */
+  if (d.transitou && !/arquivado definitiv/i.test(nrm(r.tramitacao)))
+    achados.push('Trânsito em julgado no diário');
+  /* A base guarda a data da última publicação que a sincronização capturou.
+     Sete dias de folga absorvem a defasagem normal entre as duas leituras.
+
+     Só se compara quando a base TEM data. Hoje a coluna "Data da Última
+     Publicação" está vazia nas 3.177 linhas — o Apps Script roda nos IPs do
+     Google e a API do DJEN os recusa, então ele nunca gravou nada ali. Tratar
+     ausência como atraso marcava todo processo com publicação (513 de 513),
+     afogando as pendências de resultado, que são as que exigem ação. Falta de
+     dado é um fato só, dito uma vez no resumo; a comparação volta a valer
+     sozinha quando a coluna for preenchida. */
+  const naBase = dBR(r.dtPub);
+  if (d.ultima && naBase && (d.ultima - naBase) > 7*864e5)
+    achados.push('Publicação mais nova que a base');
+
+  return achados.length ? { diag:achados[0], todos:achados }
+                        : { diag:'Confere', todos:[] };
+}
+
+/* Anota ROWS com a leitura do diário. Chamado de novo a cada recarga da
+   planilha, senão a atualização automática apagaria o cruzamento da tela. */
+function aplicarCruzamento(){
+  const M = DJ.porProc;
+  const naBase = new Set();
+  for (const r of ROWS){
+    const k = String(r.num||'').replace(/\D/g,'');
+    const d = M.get(k) || null;
+    if (d) naBase.add(k);
+    r.dj = d;
+    r.djSentenca = d && d.sentenca ? d.sentenca.dispositivo : '';
+    r.djRecurso  = d && d.recurso  ? d.recurso.dispositivo  : '';
+    r.djFase     = d && d.ultimaDecisao ? d.ultimaDecisao.fase : '';
+    r.djData     = d && d.ultima ? djBR(d.ultima) : '';
+    r.djCond     = d ? d.condenacao : 0;
+    const dg = diagnosticar(r);
+    r.djDiag = dg.diag;
+    r.djTodos = dg.todos;
+  }
+  /* Publicou no diário e não tem linha na planilha: processo fora da base. */
+  DJ.fora = [...M.values()].filter(d => !naBase.has(d.digitos));
+}
+
+async function cruzarComDJEN(){
+  if (DJ.rodando) return;
+  DJ.rodando = true;
+  const btn = $('#btnCruzar'), st = $('#djStatus');
+  btn.disabled = true; btn.textContent = '⏳ Lendo o diário…';
+  const dias = Number($('#djPeriodo').value) || 365;
+  try{
+    const r = await coletarDJEN(dias, (oab, pg, tot, achadas) => {
+      st.innerHTML = esc(oab) + ' — página <b>' + pg + '</b> de <b>' + tot + '</b> · ' +
+                     fmtN(achadas) + ' publicações lidas';
+    });
+    DJ.pubs = r.pubs; DJ.falhas = r.falhas; DJ.janela = r.janela;
+    DJ.porProc = agruparDJEN(r.pubs);
+    DJ.dias = dias; DJ.quando = new Date(); DJ.rodou = true;
+    aplicarCruzamento();
+    ['#msDjDiag','#msDjSent','#msDjFase'].forEach(id => $(id).classList.remove('hide'));
+    montarFiltros();
+    renderDJEN();
+    tabela();
+  }catch(e){
+    st.innerHTML = '<b style="color:var(--danger)">Não deu para ler o diário:</b> ' +
+                   esc(String(e.message||e).slice(0,120));
+  }finally{
+    DJ.rodando = false;
+    btn.disabled = false; btn.textContent = 'Cruzar com o DJEN';
+  }
+}
+
+
+/* ------------------------------------------------------------- tela */
+const DJ_COLS = [
+  'Nº do processo','Cliente','Produto jurídico','Diagnóstico',
+  'Sentença — planilha × diário','Recurso — planilha × diário',
+  'Fase no diário','Últ. publicação','Condenação lida','Leitura'
+];
+
+function djChipDiag(d){
+  const c = djCorDiag(d);
+  return '<span class="djdiag" style="color:'+c+';background:color-mix(in srgb,'+c+' 18%, transparent)">'+esc(d)+'</span>';
+}
+/* "o que a planilha diz → o que o diário diz". Sem as duas pontas lado a lado
+   não dá para decidir nada: o número sozinho não diz o que corrigir. */
+function djParDe(antes, depois, vazio){
+  if (!depois) return '<span class="antes">'+esc(antes||'—')+'</span>';
+  return '<span class="antes">'+esc(antes || vazio)+'</span>' +
+         '<span class="djseta">→</span><span class="depois">'+esc(depois)+'</span>';
+}
+
+function djLinhas(){
+  const ordem = DJ_DIAGS.map(x=>x[0]);
+  let L = ROWS.filter(r => r.dj);
+  if (DJ_FILTRO === 'Pendências')
+    L = L.filter(r => (r.djTodos||[]).some(d => d !== DJ_SO_ATRASO));
+  else if (DJ_FILTRO) L = L.filter(r => (r.djTodos||[]).indexOf(DJ_FILTRO) >= 0 || r.djDiag === DJ_FILTRO);
+  return L.sort((a,b)=>{
+    const oa = ordem.indexOf(a.djDiag), ob = ordem.indexOf(b.djDiag);
+    if (oa !== ob) return oa - ob;
+    const da = a.dj && a.dj.ultima ? a.dj.ultima.getTime() : 0;
+    const db = b.dj && b.dj.ultima ? b.dj.ultima.getTime() : 0;
+    return db - da;
+  });
+}
+
+/* Só pode ser gravado o que cai em campo vazio e foi lido acima do limiar.
+   Divergência sobre campo já preenchido nunca é gravada: o Apps Script recusa,
+   e sobrescrever decisão humana com heurística seria pior que o atraso. */
+function djGravaveis(){
+  const out = [];
+  for (const r of ROWS){
+    const d = r.dj; if (!d) continue;
+    if (d.sentenca && djVazioSent(r.sentenca) && DJ_COD[d.sentenca.dispositivo] &&
+        d.sentenca.confianca >= DJ_CONF_MIN) out.push([r, d.sentenca]);
+    if (d.recurso && djVazioRec(r.recurso) && DJ_COD[d.recurso.dispositivo] &&
+        d.recurso.confianca >= DJ_CONF_MIN) out.push([r, d.recurso]);
+  }
+  return out;
+}
+
+function renderDJEN(){
+  if (!DJ.rodou) return;
+  const comPub = ROWS.filter(r => r.dj);
+  const cont = {};
+  for (const r of comPub) for (const d of (r.djTodos.length ? r.djTodos : ['Confere']))
+    cont[d] = (cont[d]||0) + 1;
+  const n = d => cont[d] || 0;
+  const pend = comPub.filter(r => (r.djTodos||[]).some(d => d !== DJ_SO_ATRASO)).length;
+  const atrasados = comPub.filter(r => (r.djTodos||[]).indexOf(DJ_SO_ATRASO) >= 0).length;
+  /* Se a base inteira está sem data de publicação, o problema é a
+     sincronização, não cada processo — e é assim que precisa ser dito. */
+  const comDataPub = ROWS.filter(r => dBR(r.dtPub)).length;
+  const comMov = ROWS.filter(r => dBR(r.dtMov)).length;
+  const semDataPub = ROWS.length > 0 && comDataPub === 0;
+
+  /* O dinheiro que está parado por falta de registro — é o que justifica o
+     trabalho de conferir. */
+  const condPend = comPub
+    .filter(r => (r.djTodos||[]).indexOf('Sentença não registrada') >= 0)
+    .reduce((t,r) => t + (r.djCond||0), 0);
+
+  const K = [
+    ['Publicações lidas', fmtN(DJ.pubs.length),
+     DJ.janela.replace(' a ',' até ') + ' · ' + fmtN(DJ.porProc.size) + ' processos distintos', 'var(--primary)'],
+    ['Processos da base no diário', fmtN(comPub.length),
+     fmtN(pend) + ' com pendência de resultado', 'var(--info)'],
+    ['Sentenças que a base não registra', fmtN(n('Sentença não registrada')),
+     'já proferidas e ainda como “Não Sentenciado”', 'var(--danger)'],
+    ['Recursos que a base não registra', fmtN(n('Recurso não registrado')),
+     'acórdão publicado sem resultado no cadastro', 'var(--warning)'],
+    ['Condenação lida nessas sentenças', condPend ? fmtM(condPend) : '—',
+     'valor identificado no texto — confira antes de executar', 'var(--green)'],
+    ['No diário e fora da base', fmtN(DJ.fora.length),
+     'processos publicados sem linha na planilha', 'var(--neutral)']
+  ];
+  $('#djKpis').innerHTML = K.map(k =>
+    '<div class="kpi static" style="--accent:'+k[3]+'"><div class="lbl">'+k[0]+'</div>'+
+    '<div class="val mono">'+k[1]+'</div><div class="sub">'+k[2]+'</div></div>').join('');
+
+  const grav = djGravaveis();
+  $('#btnGravarDj').disabled = !grav.length || !webapp();
+  $('#btnGravarDj').textContent = grav.length
+    ? 'Gravar ' + fmtN(grav.length) + ' resultado(s) na planilha'
+    : 'Nada a gravar na planilha';
+
+  $('#djStatus').innerHTML = 'Diário lido em <b>' + djBR(DJ.quando) + '</b>' +
+    (DJ.falhas ? ' · <b style="color:var(--warning)">' + DJ.falhas +
+                 ' página(s) sem resposta</b> — pode faltar publicação' : '') + '.';
+
+  $('#djAviso').innerHTML =
+    (pend
+      ? '<b>' + fmtN(pend) + ' processo(s)</b> em que o diário já publicou um resultado que o cadastro ' +
+        'não reflete. Não é erro de leitura do DJEN: é registro atrasado — e sentença procedente sem ' +
+        'registro é execução que ninguém abriu.'
+      : 'Nenhuma pendência de resultado no período: o cadastro está acompanhando o diário.') +
+    (semDataPub
+      ? ' <b>A planilha não tem nenhuma data de publicação gravada</b> (' + fmtN(ROWS.length) +
+        ' linhas, coluna “Data da Última Publicação” vazia): o Apps Script roda nos servidores do ' +
+        'Google e a API do DJEN recusa esses IPs, então essa coluna nunca foi preenchida. Por isso o ' +
+        'cruzamento não compara datas de publicação — compara <b>resultado</b>, que é o que decide ' +
+        'execução. Movimentação do DataJud a planilha tem: ' + fmtN(comMov) + ' linhas.'
+      : atrasados
+        ? ' Além disso, em <b>' + fmtN(atrasados) + '</b> processo(s) a última publicação do diário é ' +
+          'mais nova que a registrada na planilha — a sincronização está atrás. Por não exigir decisão ' +
+          'processo a processo, fica fora da lista padrão; o chip abaixo mostra quais são.'
+        : '') +
+    ' A gravação automática só toca em <b>campo vazio</b> e só com leitura de <b>' + DJ_CONF_MIN +
+    '% ou mais</b>; divergência sobre campo já preenchido fica aqui para decisão sua, porque ' +
+    'sobrescrever o que uma pessoa cadastrou com uma heurística seria pior que o atraso. Toda ' +
+    'gravação vai para a aba <b>_ResultadosDJEN</b> com o valor anterior e o link da certidão.' +
+    (DJ.fora.length
+      ? ' <b>' + fmtN(DJ.fora.length) + '</b> processo(s) apareceram no diário e não existem na planilha — ' +
+        'use “Incluir na base” no painel Publicações DJEN para trazê-los.'
+      : '') +
+    (webapp() ? '' : ' <b style="color:var(--warning)">O envio para a planilha não está configurado</b> — ' +
+                     'clique em ⚙ no topo e cole a URL do Web App para habilitar a gravação.');
+
+  /* chips */
+  const chips = ['Pendências']
+    .concat(DJ_DIAGS.map(x=>x[0]).filter(d => n(d) > 0 && d !== 'Sem publicação no período'));
+  $('#djChips').innerHTML = chips.map(c => {
+    const q = c === 'Pendências' ? pend : n(c);
+    return '<button class="djchip' + (DJ_FILTRO===c?' on':'') + '" data-d="'+esc(c)+'">' +
+           esc(c) + ' <b>' + fmtN(q) + '</b></button>';
+  }).join('');
+  $('#djChips').classList.remove('hide');
+  $$('#djChips .djchip').forEach(b => b.onclick = () => {
+    DJ_FILTRO = b.dataset.d; renderDJEN();
+  });
+  $('#djWrap').classList.remove('hide');
+  $('#btnXLSXDj').classList.remove('hide');
+
+  /* tabela */
+  const L = djLinhas();
+  $('#djThead').innerHTML = '<tr>' + DJ_COLS.map(c=>'<th>'+c+'</th>').join('') + '</tr>';
+  const vis = L.slice(0, 400);
+  $('#djTbody').innerHTML = vis.map(r => {
+    const d = r.dj;
+    const sent = d.sentenca ? d.sentenca.dispositivo + (d.sentenca.parcial ? ' (em parte)' : '') : '';
+    const rec  = d.recurso  ? d.recurso.dispositivo  + (d.recurso.parcial  ? ' (em parte)' : '') : '';
+    const conf = Math.max(d.sentenca?d.sentenca.confianca:0, d.recurso?d.recurso.confianca:0);
+    return '<tr data-l="'+r.linha+'">' +
+      '<td class="mono" style="white-space:nowrap">'+esc(r.num)+'</td>' +
+      '<td><span class="trunc" style="max-width:160px">'+esc(r.cliente||r.partes||'—')+'</span></td>' +
+      '<td><span class="trunc" style="max-width:150px">'+esc(r.produto||'—')+'</span></td>' +
+      '<td>'+(r.djTodos.length ? r.djTodos.map(djChipDiag).join(' ') : djChipDiag('Confere'))+'</td>' +
+      '<td>'+djParDe(r.sentenca, sent, 'Não Sentenciado')+'</td>' +
+      '<td>'+djParDe(r.recurso, rec, 'Não Houve Recurso')+'</td>' +
+      '<td>'+esc(d.ultimaDecisao ? d.ultimaDecisao.fase : '—')+'</td>' +
+      '<td class="mono" style="white-space:nowrap">'+esc(r.djData||'—')+'</td>' +
+      '<td class="mono" style="white-space:nowrap">'+(r.djCond?fmtM(r.djCond):'—')+'</td>' +
+      '<td class="mono">'+(conf?conf+'%':'—')+'</td></tr>';
+  }).join('');
+  $$('#djTbody tr').forEach(tr => tr.onclick = () => abrirDetalhe(+tr.dataset.l));
+}
+
+async function gravarResultadosDJ(){
+  const url = webapp();
+  if (!url){ abrirConfig('Cole a URL do Web App para gravar os resultados na planilha.'); return; }
+  const alvo = djGravaveis();
+  if (!alvo.length) return;
+  const btn = $('#btnGravarDj');
+  btn.disabled = true; btn.textContent = '⏳ Gravando…';
+  let gravados = 0, cego = false, erro = null;
+
+  /* Em lotes: o payload viaja na URL, e URL longa demais é recusada em silêncio. */
+  for (let i = 0; i < alvo.length; i += 30){
+    const dados = alvo.slice(i, i+30).map(([r, p]) => {
+      /* Grava "Procedência" nos dois casos, mas o código distingue para o log
+         da planilha não perder que a procedência foi parcial. */
+      const par = DJ_COD[p.dispositivo];
+      const cod = (p.parcial && p.dispositivo === 'Procedente') ? 'R' : par[0];
+      return [r.num.replace(/\D/g,''), cod, par[1], p.confianca, djISO(p.disp), p.hash||''].join(':');
+    }).join('|');
+    const link = url + (url.indexOf('?')<0?'?':'&') + 'acao=resultado&token=' +
+                 encodeURIComponent(token()) + '&dados=' + encodeURIComponent(dados);
+    try{
+      const j = await (await fetch(link)).json();
+      if (j && j.ok && j.resultado) gravados += j.resultado.gravados || 0;
+      else if (j && j.erro) erro = j.erro;
+    }catch(e){
+      /* o Apps Script às vezes bloqueia a leitura da resposta por CORS; a
+         gravação em si acontece */
+      try{ await fetch(link, {mode:'no-cors'}); cego = true; }catch(e2){ erro = e2.message; }
+    }
+  }
+
+  $('#djAviso').innerHTML = erro
+    ? '<b style="color:var(--danger)">Não deu para gravar:</b> ' + esc(String(erro).slice(0,140))
+    : cego
+      ? '<b>' + fmtN(alvo.length) + ' resultado(s) enviados.</b> O navegador não conseguiu ler a ' +
+        'resposta do Apps Script (CORS) — confira a aba <b>_ResultadosDJEN</b> da planilha, que ' +
+        'registra cada gravação com o valor anterior.'
+      : '<b>' + fmtN(gravados) + ' resultado(s) gravados</b> na Base geral. Cada gravação fica ' +
+        'registrada na aba <b>_ResultadosDJEN</b>, com o valor anterior e o link da certidão. ' +
+        'Clique em <b>↻ Atualizar</b> para reler a planilha.';
+  btn.textContent = 'Gravar sentenças e recursos na planilha';
+  btn.disabled = false;
+}
+
+function exportarCruzamento(){
+  if (typeof XLSX === 'undefined'){
+    alert('A biblioteca de Excel não carregou. Verifique a conexão e recarregue a página.');
+    return;
+  }
+  const cab = ['Numero','Cliente','Produto juridico','Diagnosticos','Sentenca (planilha)',
+               'Sentenca (diario)','Recurso (planilha)','Recurso (diario)','Fase no diario',
+               'Ultima publicacao no diario','Ultima publicacao na base','Condenacao lida',
+               'Transitou em julgado','Confianca da leitura','Publicacoes no periodo','Tribunal'];
+  const linhas = djLinhas().map(r => { const d = r.dj; return [
+    r.num, r.cliente||r.partes||'', r.produto||'', (r.djTodos||[]).join(' · ') || 'Confere',
+    r.sentenca||'', d.sentenca ? d.sentenca.dispositivo + (d.sentenca.parcial?' (em parte)':'') : '',
+    r.recurso||'',  d.recurso  ? d.recurso.dispositivo  + (d.recurso.parcial ?' (em parte)':'') : '',
+    d.ultimaDecisao ? d.ultimaDecisao.fase : '', r.djData||'', r.dtPub||'',
+    r.djCond||'', d.transitou?'Sim':'Nao',
+    Math.max(d.sentenca?d.sentenca.confianca:0, d.recurso?d.recurso.confianca:0) || '',
+    d.pubs, d.tribunal ];
+  });
+  const numericas = new Set([11, 13, 14]);
+  const dados = linhas.map(l => l.map((c,i) => {
+    if (c == null || c === '') return '';
+    if (numericas.has(i)){ const n = Number(c); return isFinite(n) ? n : c; }
+    return c;
+  }));
+  const ws = XLSX.utils.aoa_to_sheet([cab].concat(dados));
+  ws['!cols'] = cab.map((c,i) => ({ wch: i===3 ? 40 : Math.max(12, Math.min(30, c.length + 4)) }));
+  ws['!autofilter'] = { ref: XLSX.utils.encode_range({ s:{r:0,c:0}, e:{r:dados.length, c:cab.length-1} }) };
+  ws['!freeze'] = { xSplit: 0, ySplit: 1 };
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, 'Cruzamento DJEN');
+  XLSX.writeFile(wb, 'cruzamento-datajud-djen-' + new Date().toISOString().slice(0,10) + '.xlsx');
+}
+
 /* =====================================================================
    EVENTOS / BOOT
    ===================================================================== */
 $('#btnAtualizar').onclick = atualizar;
 $('#btnCfg').onclick = () => abrirConfig();
+$('#btnCruzar').onclick = cruzarComDJEN;
+$('#btnGravarDj').onclick = gravarResultadosDJ;
+$('#btnXLSXDj').onclick = exportarCruzamento;
 $('#btnFechar').onclick = fechar;
 $('#ov').onclick = fechar;
 document.addEventListener('keydown', e=>{ if(e.key==='Escape') fechar(); });
@@ -1598,10 +2616,14 @@ function matrizExport(){
                'Fase (DataJud)','Fase (cadastro)','Status do Processo','Status de Movimentacao','Estado (cruzamento)',
                'Situacao (original)','Resultado da sentenca','Resultado do recurso',
                'Situacao do alvara','Dias sem movimentacao','Movimentos','Publicacoes','Ultima movimentacao',
-               'Data ultima movimentacao','Data ultima publicacao','Valor da causa'];
+               'Data ultima movimentacao','Data ultima publicacao','Valor da causa',
+               'Sentenca no diario (DJEN)','Recurso no diario (DJEN)','Fase no diario',
+               'Cruzamento DJEN','Ultima publicacao no diario','Condenacao lida no diario'];
   const linhas = L.map(r=>[r.num,r.tipo,r.cliente,r.produto,r.autor,r.reu,r.partes,r.tribunal,r.grau,r.vara,r.classe,r.assunto,
     r.ajuizamento,r.fase,r.faseCad,r.tramitacao,r.movimentacao,r.estado,r.situacao,r.sentenca,r.recurso,
-    r.alvara,r.dias,r.qtdMov,r.qtdPub,r.ultMov,r.dtMov,r.dtPub,r.valor]);
+    r.alvara,r.dias,r.qtdMov,r.qtdPub,r.ultMov,r.dtMov,r.dtPub,r.valor,
+    r.djSentenca||'',r.djRecurso||'',r.djFase||'',
+    r.djDiag&&r.djDiag!=='Sem publicação no período'?r.djDiag:'',r.djData||'',r.djCond||'']);
   return { cab, linhas };
 }
 
