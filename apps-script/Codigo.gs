@@ -593,10 +593,25 @@ function garantirControles_(ss) {
   ]);
   aba.getRange(1, 4).setFontWeight('bold');
   aba.getRange(2, 5, 2, 1).insertCheckboxes();
-  /* setFormula usa sempre a sintaxe en-US (virgula), independentemente do locale da planilha */
-  aba.getRange(4, 5).setFormula("=COUNTIFS('" + base + "'!B2:B,\"<>\",'" + base + "'!D2:D,\"\",'" + base + "'!N2:N,\"\",'" + base + "'!P2:P,\"\")");
+  /* numero gravado pelo script (formula quebrava com o separador ; do locale pt-BR) */
+  aba.getRange(4, 5).setValue(contarSemPreenchimento_(ss));
   aba.setColumnWidth(4, 300); aba.setColumnWidth(5, 420);
   aba.getRange(5, 5).setWrap(true);
+}
+
+/** Linhas com numero CNJ na coluna B e nada em D (tribunal), N (movimentos) e P (ultima atualizacao). */
+function contarSemPreenchimento_(ss) {
+  var aba = ss.getSheetByName(cfg_('ABA_BASE'));
+  var ult = aba ? aba.getLastRow() : 0;
+  if (ult < 2) return 0;
+  var v = aba.getRange(2, 2, ult - 1, 15).getValues();   // B..P
+  var n = 0;
+  for (var i = 0; i < v.length; i++) {
+    if (soDigitos_(v[i][0]).length !== 20) continue;
+    if (String(v[i][2] || '').trim() || String(v[i][12] || '').trim() || String(v[i][14] || '').trim()) continue;
+    n++;
+  }
+  return n;
 }
 
 /** Gatilho instalavel de edicao. */
@@ -626,6 +641,7 @@ function aoEditarPlanilha(e) {
     if (mudouB) rng.setValues(vals);
     if (mudouO) aba.getRange(r1, COL_ORIGEM, qtd, 1).setValues(origem);
     agendarPreenchimento_(60);
+    try { garantirSync_(planilha_()).getRange(4, 5).setValue(contarSemPreenchimento_(planilha_())); } catch (e3) {}
     gravarSync_({ mensagem: novos + ' processo(s) lancado(s) na planilha - preenchimento automatico em ~1 min.' });
   } catch (err) {
     try { gravarSync_({ mensagem: 'Aviso (edicao): ' + ((err && err.message) || err) }); } catch (e2) {}
@@ -689,6 +705,7 @@ function preencherNovos() {
     if (String(trib[i][0] || '').trim() || String(mov[i][0] || '').trim() || String(atu[i][0] || '').trim()) continue;
     qtd++; if (!primeira) primeira = i + 2;
   }
+  try { garantirSync_(ss).getRange(4, 5).setValue(qtd); } catch (e0) {}
   try { garantirSync_(ss).getRange(6, 5).setValue(Utilities.formatDate(new Date(), Session.getScriptTimeZone() || 'America/Bahia', 'dd/MM/yyyy HH:mm') + ' - ' + qtd + ' novo(s)'); } catch (e) {}
   if (!qtd) { gravarSync_({ mensagem: 'Nenhum processo novo sem preenchimento.' }); return; }
   props_().setProperty('cursor', JSON.stringify({ etapa: 'datajud', modo: 'novos', i: 0, base: primeira, novos: qtd, segundaPassada: true }));
