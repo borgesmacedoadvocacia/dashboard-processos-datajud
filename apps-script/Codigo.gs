@@ -85,6 +85,8 @@ function onOpen() {
     .addItem('Incluir processos por numero (colar lista)', 'incluirProcessosPorNumero')
     .addItem('Buscar processos novos no diario (DJEN)', 'buscarProcessosNoDiario')
     .addItem('Aplicar OABs padrao no _Config', 'aplicarOABsPadrao')
+    .addItem('Preencher so os processos novos', 'preencherNovos')
+    .addItem('Instalar gatilho de edicao (lancamento na planilha)', 'instalarGatilhoEdicao')
     .addItem('Configurar tudo (1a vez)', 'configurarTudo')
     .addItem('Recriar gatilho das 6h', 'criarGatilhoDiario')
     .addItem('Cancelar sincronizacao', 'cancelarSincronizacao')
@@ -99,6 +101,7 @@ function configurarTudo() {
   garantirDJEN_(ss);
   garantirCabecalho_(ss);
   criarGatilhoDiario();
+  try { instalarGatilhoEdicao(); } catch (e) { gravarSync_({ mensagem: 'Aviso: gatilho de edicao nao instalado (' + e.message + ').' }); }
   try {
     SpreadsheetApp.getUi().alert(
       'Configuracao concluida.\n\n' +
@@ -552,6 +555,148 @@ function doGet(e) {
   }
   return ContentService.createTextOutput(JSON.stringify(saida))
     .setMimeType(ContentService.MimeType.JSON);
+}
+
+/* --------------------- LANCAMENTO DIRETO NA PLANILHA --------------------
+   O caminho mais curto para incluir processos: colar o numero CNJ na coluna B
+   da "Base geral". Um gatilho de edicao instalavel (o script e independente,
+   entao onOpen/onEdit simples nao rodam) normaliza o numero, marca a origem e
+   agenda o preenchimento; a aba _Sync ganha duas caixas de controle para
+   disparar a atualizacao completa ou so dos novos sem abrir o dashboard. */
+var GATILHO_EDICAO = 'aoEditarPlanilha';
+var GATILHO_NOVOS  = 'preencherNovos';
+var COL_ORIGEM     = 28;   // AB - Origem do Cadastro
+var CTRL_TUDO  = '\u25B6 Atualizar tudo agora (DataJud + DJEN)';
+var CTRL_NOVOS = '\u25B6 Preencher so os processos novos';
+
+/** Instala (ou reinstala) o gatilho de edicao da planilha e as caixas de controle. */
+function instalarGatilhoEdicao() {
+  ScriptApp.getProjectTriggers().forEach(function (t) {
+    if (t.getHandlerFunction() === GATILHO_EDICAO) ScriptApp.deleteTrigger(t);
+  });
+  ScriptApp.newTrigger(GATILHO_EDICAO).forSpreadsheet(cfg_('PLANILHA_ID')).onEdit().create();
+  garantirControles_(planilha_());
+  gravarSync_({ mensagem: 'Gatilho de edicao instalado: numero CNJ colado na coluna B da Base geral dispara o preenchimento em ~1 min. Caixas de controle em _Sync!D2:E3.' });
+}
+
+/** Caixas de controle e contador na aba _Sync (colunas D/E, sem mexer em A/B). */
+function garantirControles_(ss) {
+  var aba = garantirSync_(ss);
+  var base = cfg_('ABA_BASE');
+  aba.getRange(1, 4, 6, 2).setValues([
+    ['CONTROLES', ''],
+    [CTRL_TUDO, ''],
+    [CTRL_NOVOS, ''],
+    ['Processos sem preenchimento', ''],
+    ['Como lancar', 'Cole o numero CNJ na coluna B da "' + base + '" (uma linha por processo). O preenchimento comeca sozinho em ~1 min; acompanhe nas colunas A/B desta aba. Marque a caixa ao lado para forcar.'],
+    ['Ultima verificacao', '']
+  ]);
+  aba.getRange(1, 4).setFontWeight('bold');
+  aba.getRange(2, 5, 2, 1).insertCheckboxes();
+  /* setFormula usa sempre a sintaxe en-US (virgula), independentemente do locale da planilha */
+  aba.getRange(4, 5).setFormula("=COUNTIFS('" + base + "'!B2:B,\"<>\",'" + base + "'!D2:D,\"\",'" + base + "'!N2:N,\"\",'" + base + "'!P2:P,\"\")");
+  aba.setColumnWidth(4, 300); aba.setColumnWidth(5, 420);
+  aba.getRange(5, 5).setWrap(true);
+}
+
+/** Gatilho instalavel de edicao. */
+function aoEditarPlanilha(e) {
+  try {
+    if (!e || !e.range) return;
+    var aba = e.range.getSheet(), nome = aba.getName();
+    if (nome === ABA_SYNC) { tratarControle_(e, aba); return; }
+    if (nome !== cfg_('ABA_BASE')) return;
+    var c1 = e.range.getColumn(), c2 = c1 + e.range.getNumColumns() - 1;
+    if (c1 > 2 || c2 < 2) return;                       // nao tocou a coluna B
+    var r1 = Math.max(2, e.range.getRow());
+    var qtd = e.range.getRow() + e.range.getNumRows() - r1;
+    if (qtd <= 0) return;
+    var rng = aba.getRange(r1, 2, qtd, 1), vals = rng.getValues();
+    var origem = aba.getRange(r1, COL_ORIGEM, qtd, 1).getValues();
+    var novos = 0, mudouB = false, mudouO = false;
+    for (var i = 0; i < qtd; i++) {
+      var n = soDigitos_(vals[i][0]);
+      if (n.length !== 20) continue;
+      var mascara = formatarCNJ_(n);
+      if (String(vals[i][0]) !== mascara) { vals[i][0] = mascara; mudouB = true; }
+      if (!String(origem[i][0] || '').trim()) { origem[i][0] = 'Lancado na planilha'; mudouO = true; }
+      novos++;
+    }
+    if (!novos) return;
+    if (mudouB) rng.setValues(vals);
+    if (mudouO) aba.getRange(r1, COL_ORIGEM, qtd, 1).setValues(origem);
+    agendarPreenchimento_(60);
+    gravarSync_({ mensagem: novos + ' processo(s) lancado(s) na planilha - preenchimento automatico em ~1 min.' });
+  } catch (err) {
+    try { gravarSync_({ mensagem: 'Aviso (edicao): ' + ((err && err.message) || err) }); } catch (e2) {}
+  }
+}
+
+/** Caixas marcadas na aba _Sync. */
+function tratarControle_(e, aba) {
+  if (e.range.getColumn() !== 5 || e.range.getNumRows() !== 1) return;
+  if (e.value !== 'TRUE' && e.value !== true) return;
+  var rotulo = String(aba.getRange(e.range.getRow(), 4).getValue() || '');
+  e.range.setValue(false);
+  if (rotulo === CTRL_TUDO) {
+    var st = lerSync_();
+    if (st.status === 'rodando' && props_().getProperty('cursor')) {
+      gravarSync_({ mensagem: 'Ja ha sincronizacao em curso - aguarde terminar.' }); return;
+    }
+    iniciarSincronizacao_('completa', 'planilha');
+    limparGatilhosContinuacao_();
+    ScriptApp.newTrigger('continuarSincronizacao').timeBased().after(5 * 1000).create();
+  } else if (rotulo === CTRL_NOVOS) {
+    agendarPreenchimento_(5);
+    gravarSync_({ mensagem: 'Preenchimento dos novos agendado (segundos).' });
+  }
+}
+
+function agendarPreenchimento_(segundos) {
+  ScriptApp.getProjectTriggers().forEach(function (t) {
+    if (t.getHandlerFunction() === GATILHO_NOVOS) ScriptApp.deleteTrigger(t);
+  });
+  ScriptApp.newTrigger(GATILHO_NOVOS).timeBased().after(Math.max(1, segundos) * 1000).create();
+}
+
+/**
+ * Preenche so as linhas ainda nunca consultadas (numero na coluna B e D, N e
+ * P vazias): DataJud a partir da primeira linha nova + consolidacao dos
+ * indicadores. As publicacoes do DJEN desses processos entram na rodada
+ * diaria (a varredura do diario e por OAB, nao por processo).
+ */
+function preencherNovos() {
+  ScriptApp.getProjectTriggers().forEach(function (t) {
+    if (t.getHandlerFunction() === GATILHO_NOVOS) ScriptApp.deleteTrigger(t);
+  });
+  var st = lerSync_();
+  if (st.status === 'rodando' && props_().getProperty('cursor')) {
+    gravarSync_({ mensagem: 'Ja ha sincronizacao em curso; os processos novos entram nela.' }); return;
+  }
+  var ss = planilha_();
+  garantirConfig_(ss); garantirSync_(ss); garantirDJEN_(ss); garantirCabecalho_(ss);
+  var aba = ss.getSheetByName(cfg_('ABA_BASE'));
+  var ult = aba.getLastRow();
+  if (ult < 2) { gravarSync_({ mensagem: 'Base geral vazia.' }); return; }
+  var qtdL = ult - 1;
+  var nums = aba.getRange(2, 2, qtdL, 1).getValues();
+  var trib = aba.getRange(2, 4, qtdL, 1).getValues();
+  var mov  = aba.getRange(2, 14, qtdL, 1).getValues();
+  var atu  = aba.getRange(2, 16, qtdL, 1).getValues();
+  var primeira = 0, qtd = 0;
+  for (var i = 0; i < qtdL; i++) {
+    if (soDigitos_(nums[i][0]).length !== 20) continue;
+    if (String(trib[i][0] || '').trim() || String(mov[i][0] || '').trim() || String(atu[i][0] || '').trim()) continue;
+    qtd++; if (!primeira) primeira = i + 2;
+  }
+  try { garantirSync_(ss).getRange(6, 5).setValue(Utilities.formatDate(new Date(), Session.getScriptTimeZone() || 'America/Bahia', 'dd/MM/yyyy HH:mm') + ' - ' + qtd + ' novo(s)'); } catch (e) {}
+  if (!qtd) { gravarSync_({ mensagem: 'Nenhum processo novo sem preenchimento.' }); return; }
+  props_().setProperty('cursor', JSON.stringify({ etapa: 'datajud', modo: 'novos', i: 0, base: primeira, novos: qtd, segundaPassada: true }));
+  gravarSync_({ status: 'rodando', etapa: 'datajud', inicio: new Date(), fim: '', progresso: 0,
+    novos: qtd, movimentos: 0, publicacoes: 0,
+    mensagem: 'Preenchendo ' + qtd + ' processo(s) novo(s) a partir da linha ' + primeira + ' (DataJud + indicadores).' });
+  limparGatilhosContinuacao_();
+  executarEtapas_();
 }
 
 /* --------------------------- ORQUESTRACAO ------------------------------- */

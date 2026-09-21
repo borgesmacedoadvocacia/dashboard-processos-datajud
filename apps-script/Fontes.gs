@@ -203,7 +203,7 @@ function consolidarDataJud_(regs, maxMov) {
     movimentos: cortar_(texto), qtdMov: qtd,
     ultMovData: recorte.length ? dataBR_(recorte[0].dt) : '',
     ultMovNome: ultNome,
-    tipo: classificarTipo_(regs, numero),
+    tipo: classificarTipo_(regs),
     statusProcesso: statusPelosMovimentos_(movs),
     fase: inferirFase_(trilha, classes.join(' | '), ultNome, recente)
   };

@@ -47,6 +47,29 @@ continuação antes de estourar o limite de 6 minutos do Apps Script.
 
 ---
 
+## Lançar processos direto na planilha
+
+O caminho mais curto para incluir processos é **colar o número CNJ na coluna B da aba `Base geral`**
+(uma linha por processo). Um gatilho de edição instalado pelo script (`instalarGatilhoEdicao`, também
+chamado por `configurarTudo`) faz o resto:
+
+1. normaliza o número com a máscara CNJ e marca a coluna AB (*Origem do Cadastro*) como "Lancado na planilha";
+2. agenda `preencherNovos` para ~1 minuto depois (edições em sequência só reagendam);
+3. `preencherNovos` localiza as linhas nunca consultadas (número em B com D, N e P vazias), consulta o DataJud
+   a partir da primeira delas e recalcula os indicadores de gestão. As publicações do DJEN desses processos
+   entram na rodada diária das 6h (a varredura do diário é por OAB, não por processo).
+
+A aba `_Sync` ganha um bloco de controle nas colunas D/E:
+
+| Célula | Função |
+|---|---|
+| E2 ☐ **Atualizar tudo agora (DataJud + DJEN)** | dispara a sincronização completa (o mesmo do botão do dashboard) |
+| E3 ☐ **Preencher só os processos novos** | dispara `preencherNovos` em segundos |
+| E4 | contador de processos ainda sem preenchimento |
+| E6 | última verificação de novos |
+
+As caixas voltam a desmarcadas sozinhas; o andamento aparece em A/B da mesma aba.
+
 ## Colunas da aba `Base geral`
 
 | Col | Campo | Origem |
